@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# office 指令的包裝：把這個資料夾加進 PATH 後，就能在任何地方執行 office ...
+exec bun "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/office.ts" "$@"

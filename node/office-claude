@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# 啟動「辦公室用」的 Claude Code：載入 office 頻道外掛（開發者頻道，啟動時會有一次確認畫面）。
+# 只有用這個指令開的 session 會連到 Hub 收派工、回報狀態；平常開的 claude 不受影響。
+export OFFICE_SESSION=1
+export OFFICE_AS=claude
+exec claude --dangerously-load-development-channels plugin:office@office-local "$@"

@@ -1,0 +1,19 @@
+{
+  "hub": "http://100.64.0.11:7070",
+  "machine": "A",
+  "claude_token": "7000000001:貼上 claude_a 的 token",
+  "hermes_token": "7000000003:貼上 hermes_a 的 token",
+  "approvers": [1000000001],
+  "hermes": {
+    "mode": "cli",
+    "cmd": ["hermes", "chat", "-Q", "-q"],
+    "api_url": "http://127.0.0.1:8642",
+    "api_key": "",
+    "model": "hermes-agent",
+    "cwd": "~/office-work",
+    "timeout_min": 30,
+    "env": {}
+  },
+  "verify_timeout_sec": 120,
+  "claude_process_pattern": "office@office-local"
+}

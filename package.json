@@ -1,0 +1,20 @@
+{
+  "name": "office-hub",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "AI 辦公室 Hub：自架、相容 Telegram Bot API 的訊息中樞",
+  "scripts": {
+    "init": "bun run src/cli.ts init",
+    "start": "bun run src/server.ts",
+    "dev": "bun --watch run src/server.ts",
+    "cli": "bun run src/cli.ts",
+    "office": "bun run node/office.ts",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.17.5",
+    "grammy": "1.30.0",
+    "zod": "3.25.76"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "office",
+  "description": "AI office channel for Claude Code — connects this session to a self-hosted Office Hub (Telegram Bot API compatible). Based on the official Telegram channel plugin.",
+  "version": "0.2.0",
+  "keywords": [
+    "office",
+    "channel",
+    "mcp",
+    "multi-agent"
+  ],
+  "author": {
+    "name": "AI Office"
+  }
+}

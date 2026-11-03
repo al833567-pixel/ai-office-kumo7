@@ -1,0 +1,9 @@
+This plugin is a modified version of the Telegram channel plugin from
+https://github.com/anthropics/claude-plugins-official (external_plugins/telegram),
+licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Changes: connects to a self-hosted Office Hub via grammY apiRoot instead of
+api.telegram.org; reads OFFICE_HUB_URL / OFFICE_BOT_TOKEN; only runs in sessions
+started with OFFICE_SESSION=1; adds thread_id and structured data to inbound
+events; restricts permission approval to human approvers; adds status hooks;
+removes the Telegram pairing skills.

@@ -1,0 +1,14 @@
+{
+  "name": "office-local",
+  "owner": {
+    "name": "AI Office"
+  },
+  "plugins": [
+    {
+      "name": "office",
+      "source": "./office",
+      "description": "AI 辦公室頻道：把 Office Hub 的派工、回報、聊天推進這個 Claude Code session，並回報狀態給 Hub。"
+    }
+  ],
+  "description": "Local marketplace for the AI office channel plugin."
+}
