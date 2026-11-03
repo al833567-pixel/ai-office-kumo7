@@ -413,6 +413,8 @@ async function cmdSetupDesktop(cfg: Config, args: string[]) {
     ? spawnSync(["claude", ...a].map((x) => /[\s"]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x).join(" "), { encoding: "utf8", shell: true })
     : spawnSync("claude", a, { encoding: "utf8" });
   claude(["mcp", "remove", name, "-s", "user"]);
+  // 舊版教學加過的 office-hub 跟 office-desktop 是同一組工具，留著會出現兩份
+  const oldHub = claude(["mcp", "remove", "office-hub", "-s", "user"]).status === 0;
   const r = claude(["mcp", "add", "--transport", "http", "-s", "user", name, url, "--header", `Authorization: Bearer ${token}`]);
   const skillSrc = join(import.meta.dir, "..", "claude", "skill-office", "SKILL.md");
   const skillDir = join(homedir(), ".claude", "skills", "office");
@@ -421,7 +423,9 @@ async function cmdSetupDesktop(cfg: Config, args: string[]) {
   const manual = `claude mcp add --transport http -s user ${name} ${url} --header "Authorization: Bearer <token>"`;
   console.log(`桌面版主管設定（@${me.username}）：
   MCP：${r.status === 0 ? `已加入 ${name} → ${url}` : `自動加入失敗（${(r.stderr || r.error?.message || "").trim()}），請手動執行：\n    ${manual}`}
-  /office skill：${join(skillDir, "SKILL.md")}
+  /office skill：${join(skillDir, "SKILL.md")}${oldHub ? "\n  已移除重複的舊 MCP：office-hub" : ""}
+  office 外掛：桌面版用不到（沒有 OFFICE_SESSION=1 時不提供工具、hooks 也不動作），留著無害；
+    不會再用終端機辦公室模式的話可以移除：claude plugin uninstall office@office-local
 
 接下來：
   1. 設定檔加上 "claude_mode": "desktop"，再重新啟動 office-node（office run），UI 才會把 @${me.username} 顯示為在線。

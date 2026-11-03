@@ -217,10 +217,16 @@ scripts\windows\start-office-node.cmd
 office setup-desktop
 ```
 
-它會把 Hub 的 MCP（`office-desktop`，用 `claude_token` 的帳號）加進 Claude Code 設定，並安裝 `/office` skill。桌面版和命令列讀同一份設定，所以 PATH 裡要有命令列版 `claude`；沒有的話它會印出手動指令。接著：
+它會把 Hub 的 MCP（`office-desktop`，用 `claude_token` 的帳號）加進 Claude Code 設定、移除舊的重複設定 `office-hub`，並安裝 `/office` skill。桌面版和命令列讀同一份設定，所以 PATH 裡要有命令列版 `claude`；沒有的話它會印出手動指令。接著：
 
 1. 設定檔 `~/.office/config.json` 加上 `"claude_mode": "desktop"`，重開 office-node。桌面版沒有 hooks，改由 office-node 在跑就把這個 Claude 顯示為在線。
 2. 重開桌面版，開一個本機 session，輸入 `/office <目標>`。
+
+office 外掛（`office@office-local`）在桌面版用不到：沒有 `OFFICE_SESSION=1` 時它不提供工具，hooks 也不動作，留著無害。確定不再用終端機模式的話可以移除：
+
+```bash
+claude plugin uninstall office@office-local
+```
 
 桌面版會自己開目標、派工，然後在同一輪裡用 `office_wait` 等回報、審查、結案，最後在對話裡交出成果。差別是：桌面版不能被「叫醒」，所以**等待期間那一輪會一直跑**，你要在它等的時候插話，按停止再打字即可（之後說「繼續等 #目標」就會接著等）。別人（另一台 Claude、失敗改派）丟給它的工作，也要等它下一次 `office_wait` 才會看到。
 
