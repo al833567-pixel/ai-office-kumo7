@@ -6,5 +6,8 @@ rem NOTE: keep this file pure ASCII (cmd.exe reads it in the system code page).
 setlocal
 cd /d "%~dp0..\.."
 if not exist data\logs mkdir data\logs
+title AI Office Node
+echo [office] office-node running - log: %CD%\data\logs\office-node.log
+echo [office] Close this window to stop it.
 echo [%date% %time%] office-node starting >> data\logs\office-node.log
 bun node\office.ts run >> data\logs\office-node.log 2>&1
