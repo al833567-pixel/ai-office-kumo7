@@ -1,7 +1,7 @@
 // office-node：用假的 Hermes 指令跑完整個「收派工 → 執行 → 驗收 → 上傳檔案 → 回報」流程，以及 CLI。
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startHub } from "../src/server";
@@ -90,6 +90,8 @@ describe("office run（Hermes 接線）", () => {
     expect(done.result).not.toContain("\x1b");      // 沒有 ANSI 色碼
     expect(done.result).not.toContain("session_id"); // 沒有 session_id 行
     expect(done.result).not.toMatch(/[│╭╰]/);         // 沒有框線
+    expect(done.result).not.toContain("prompt-");      // 提示詞檔不在任務資料夾
+    expect(existsSync(join(dir, "work", ".prompts")) ? readdirSync(join(dir, "work", ".prompts")).length : 0).toBe(0); // 用完已刪
     expect(done.result).toContain("結束碼 0");
     expect(done.files.length).toBe(1);
     const info = await ok("claude_b", "getFile", { file_id: done.files[0] });

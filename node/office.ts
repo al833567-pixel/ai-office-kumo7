@@ -13,7 +13,7 @@
 //
 // 設定檔：~/.office/config.json（或環境變數 OFFICE_CONFIG 指定路徑）
 // 身分：預設用 claude_token；環境變數 OFFICE_AS=hermes 時用 hermes_token。
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, chmodSync, copyFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, chmodSync, copyFileSync, unlinkSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -272,15 +272,20 @@ async function askHermes(cfg: Config, prompt: string, o: { cwd: string; env: Rec
   }
   const [bin, ...args] = (h.cmd ?? ["hermes", "chat", "-Q", "-q"]).map(expand);
   let last = prompt;
+  let promptFile: string | null = null;
   if (h.prompt_via === "file") {
-    last = join(o.cwd, `prompt-${Date.now()}.txt`);
-    writeFileSync(last, prompt, "utf8");
+    // 提示詞檔放在工作根目錄的 .prompts（不在任務資料夾裡，驗收或輸出不會看到它），跑完就刪
+    const dir = join(expand(h.cwd ?? join(homedir(), "office-work")), ".prompts");
+    mkdirSync(dir, { recursive: true });
+    promptFile = last = join(dir, `prompt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.txt`);
+    writeFileSync(promptFile, prompt, "utf8");
   }
   // Windows 上 Python 程式（Hermes）被導向輸出時預設用系統編碼（例如 cp950），強制 UTF-8 免得中文變亂碼
   const utf8 = platform() === "win32" ? { PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" } : {};
   // 請 Hermes 不要輸出顏色與框線（多數 CLI 認得 NO_COLOR / TERM=dumb）；仍有的話由 cleanOutput 清掉
   const plain = { NO_COLOR: "1", FORCE_COLOR: "0", TERM: "dumb", COLUMNS: "200" };
   const r = await runProcess(bin, [...args, last], { cwd: o.cwd, env: { ...utf8, ...plain, ...(h.env ?? {}), ...o.env }, timeoutMs, onOutput: o.onOutput, signal: o.signal });
+  if (promptFile) { try { unlinkSync(promptFile); } catch { /* 刪不掉就留著，不影響結果 */ } }
   return { ...r, out: cleanOutput(r.out) };
 }
 
