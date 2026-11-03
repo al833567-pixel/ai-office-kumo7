@@ -3,6 +3,7 @@
 //   bun run src/cli.ts add <帳號> [--name 顯示名] [--kind claude|hermes|other] [--machine A] [--user]
 //   bun run src/cli.ts token <帳號>               重新產生 token（舊的立即失效）
 //   bun run src/cli.ts list                       列出帳號
+//   bun run src/cli.ts rename <帳號> <顯示名稱>     改顯示名稱（例如 rename claude_a 小克）
 //   bun run src/cli.ts disable <帳號>             停用（例如沒有用到的 hermes_b）；enable <帳號> 恢復
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { openDb, ensureOfficeGroup, addMember, OFFICE_GROUP_ID, type Account } from "./db";
@@ -68,6 +69,15 @@ switch (cmd) {
     for (const a of rows) console.log(`${String(a.id).padEnd(11)} ${a.is_bot ? "bot " : "user"} ${a.username.padEnd(10)} ${a.kind.padEnd(7)} ${(a.machine ?? "-").padEnd(3)} ${a.first_name}${a.disabled ? "（停用）" : ""}`);
     break;
   }
+  case "rename": {
+    const name = args.slice(1).join(" ").trim();
+    if (!args[0] || !name) throw new Error("用法：rename <帳號> <顯示名稱>");
+    if ([...name].length > 24) throw new Error("顯示名稱最多 24 個字");
+    const r = db.query("UPDATE accounts SET first_name = ? WHERE username = ?").run(name, args[0]);
+    if (!r.changes) throw new Error(`找不到帳號 ${args[0]}`);
+    console.log(`${args[0]} 的顯示名稱改為「${name}」（Hub 執行中的話，畫面重新整理後生效；在網頁上改則即時生效）`);
+    break;
+  }
   case "disable":
   case "enable": {
     const r = db.query("UPDATE accounts SET disabled = ? WHERE username = ?").run(cmd === "disable" ? 1 : 0, args[0] ?? "");
@@ -76,5 +86,5 @@ switch (cmd) {
     break;
   }
   default:
-    console.log("指令：init | add <帳號> [--name 顯示名] [--kind claude|hermes|other] [--machine A] [--user] | token <帳號> | list | disable <帳號> | enable <帳號>");
+    console.log("指令：init | add <帳號> [--name 顯示名] [--kind claude|hermes|other] [--machine A] [--user] | token <帳號> | list | rename <帳號> <名稱> | disable <帳號> | enable <帳號>");
 }

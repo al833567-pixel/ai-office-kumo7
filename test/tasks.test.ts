@@ -153,6 +153,22 @@ describe("審查者不在線", () => {
   });
 });
 
+describe("自訂名稱", () => {
+  test("真人可改任何帳號的名稱，bot 用 setMyName 改自己；有事件給 UI；長度有上限", async () => {
+    expect(await ok("boss", "renameAccount", { username: "claude_a", name: "小克" })).toBe(true);
+    expect((await ok("claude_b", "getChat", { chat_id: "@claude_a" })).first_name).toBe("小克");
+    expect((await ok("boss", "getAgents")).find((a: any) => a.username === "claude_a").name).toBe("小克");
+    expect(await ok("hermes_a", "setMyName", { name: "愛馬仕" })).toBe(true);
+    expect((await ok("hermes_a", "getMe")).first_name).toBe("愛馬仕");
+    expect((await call("claude_b", "renameAccount", { username: "claude_a", name: "x" })).error_code).toBe(403);
+    expect((await call("boss", "renameAccount", { username: "claude_a", name: "一二三四五六七八九十一二三四五六七八九十一二三四五" })).error_code).toBe(400);
+    const ev = hub.db.query("SELECT payload FROM events WHERE type = 'account' ORDER BY id DESC LIMIT 1").get() as { payload: string };
+    expect(JSON.parse(ev.payload)).toMatchObject({ username: "hermes_a", first_name: "愛馬仕" });
+    await ok("boss", "renameAccount", { username: "claude_a", name: "claude_a" });
+    await ok("boss", "renameAccount", { username: "hermes_a", name: "hermes_a" });
+  });
+});
+
 describe("多個綁定位址", () => {
   test("HUB_HOST 用逗號列兩個位址，兩個都能連、同一個 port", async () => {
     const h2 = startHub({ db: openDb(":memory:"), host: "127.0.0.1,127.0.0.2", port: 7391, watchdogMs: 60000 });

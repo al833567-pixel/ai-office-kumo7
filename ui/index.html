@@ -155,6 +155,12 @@ a.tag{text-decoration:none}
 .dtasks{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:12px}
 .dtasks li{display:flex;gap:8px}
 .stream .state{color:#F4C77A}
+.ico{width:14px;height:14px;image-rendering:pixelated;vertical-align:-2px;flex:none}
+.tag .ico{width:12px;height:12px}
+.dh h3 .ico{width:18px;height:18px;vertical-align:-3px}
+.rename{display:flex;gap:6px}
+.rename input{flex:1;min-width:0;background:var(--panel-2);border:2px solid var(--soft);border-radius:8px;padding:5px 9px;font-size:14px}
+.rename input:focus{outline:none;border-color:var(--honey)}
 .fsbtn{font-family:var(--f-round);font-weight:700;font-size:12px;color:#3E2E23;background:#EAD9C0;border:2px solid #3E2E23;border-radius:8px;padding:2px 10px;cursor:pointer}
 .fsbtn:hover{background:#F6E7CE}
 .stage:fullscreen{border:0;border-radius:0;box-shadow:none;background:#3A2C22;width:100vw;height:100vh;box-sizing:border-box;padding:10px max(10px,env(safe-area-inset-right,0px)) 10px max(10px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px}
@@ -212,6 +218,7 @@ a.tag{text-decoration:none}
 <aside class="drawer" id="drawer" hidden aria-label="角色詳情">
   <div class="dh"><canvas id="dAvatar" width="24" height="30"></canvas><div><h3 id="dName"></h3><div class="dmeta" id="dMeta"></div></div><button class="x" id="dClose" aria-label="關閉">×</button></div>
   <div class="db">
+    <div class="sec"><h4>顯示名稱（可自訂，最多 24 字）</h4><form class="rename" id="renameForm" autocomplete="off"><input id="renameInput" maxlength="24" aria-label="顯示名稱"><button class="btn sm" type="submit">儲存</button></form></div>
     <div class="sec"><h4>目前狀態</h4><div class="now" id="dNow"></div></div>
     <div class="sec"><h4>動態（hooks、訊息、任務）</h4><div class="stream" id="dStream"></div></div>
     <div class="sec"><h4>手上的任務</h4><ul class="dtasks" id="dTasks"></ul></div>
@@ -337,7 +344,7 @@ function desk(dx,dy,id){
   obj(dx,dy,4,2,true,()=>{
     const X=dx*T,Y=dy*T,a=agents[id],st=a.state,empty=!a.kind;
     shadow(X+2,Y+30,62,3);
-    box(X,Y-2,64,20,"#E2B07C");R(X+1,Y+15,62,2,"#CC9862");box(X+2,Y+17,60,12,"#C58F5C");R(X+28,Y+21,8,2,"#8E6440");R(X+2,Y+28,4,4,"#8E6440");R(X+58,Y+28,4,4,"#8E6440");
+    box(X,Y-2,64,20,"#E2B07C");R(X+1,Y+15,62,2,"#CC9862");box(X+2,Y+17,60,12,"#C58F5C");R(X+2,Y+28,4,4,"#8E6440");R(X+58,Y+28,4,4,"#8E6440");
     // cute cream monitor (back view)
     const glow=st==="working"||st==="done"?"#9CE6BF":st==="error"?"#FF8E80":null;
     if(glow){C.fillStyle=glow;C.globalAlpha=.35+.15*Math.sin(now*3);C.fillRect(X+3,Y-20,28,22);C.globalAlpha=1}
@@ -351,12 +358,12 @@ function desk(dx,dy,id){
     else if(a.kind==="gemini"||a.kind==="antigravity"){R(X+6,Y+1,2,7,"#F4C24A");R(X+3,Y+4,8,1,"#F4C24A");R(X+5,Y+2,4,5,"#F4C24A");R(X+6,Y+3,2,3,"#FFF4C2")}
     else if(a.kind==="claude"){R(X+3,Y-6,2,8,"#8E6440");R(X+1,Y-9,7,4,"#F4C77A");R(X+2,Y-10,5,1,"#E6B35E")}
     else if(!empty){R(X+3,Y+3,6,5,"#D9906A");R(X+2,Y-1,8,4,"#7FB46E")}
-    // 名牌最多 58px：放得下就加上機器，放不下只留名字，再放不下就截短
-    let plate=empty?"空位":`${a.name}${a.machine?" · "+a.machine+" 機":""}`;
+    // 名牌：平台小圖示＋自訂名稱（太長就截短）
+    let plate=empty?"空位":a.name;
     C.font=`900 6px ${FONT}`;
-    if(!empty&&C.measureText(plate).width>58)plate=a.name;
-    while(plate.length>2&&C.measureText(plate).width>58)plate=plate.slice(0,-2)+"…";
-    txt(plate,X+32,Y+26,6,empty?"#B39A80":"#7A5638","center",900);
+    while(plate.length>2&&C.measureText(plate).width>(empty?58:48))plate=plate.slice(0,-2)+"…";
+    if(empty)txt(plate,X+32,Y+26,6,"#B39A80","center",900);
+    else{const pw=C.measureText(plate).width+10,px0=Math.round(X+32-pw/2);drawIcon(C,a.kind,px0,Y+20);txt(plate,px0+10,Y+26,6,"#7A5638","left",900)}
   });
   lights.push({x:(dx+0.3)*T,y:(dy-0.5)*T,r:30,a:.14});
   const sx=(dx+2.5)*T,sy=(dy+0.25)*T;
@@ -493,6 +500,21 @@ const PAL={claude:{shirt:"#EE9C80",shirt2:"#D9806A",hair:"#7A5040",hair2:"#94645
   gemini:{shirt:"#9D8BD6",shirt2:"#8473C2",hair:"#3F4E8C",hair2:"#5A6BB0",star:"#F4C24A"},
   antigravity:{shirt:"#7FA6E0",shirt2:"#6A8FCB",hair:"#2F3E6E",hair2:"#4A5D96",star:"#F4C24A"},
   other:{shirt:"#E8C26A",shirt2:"#D2A94E",cap:"#C0703F",hair:"#5E4332"}};
+/* ---- 平台小圖示（7×7 像素，自己畫的辨識圖，不是官方商標） ---- */
+const ICONS={
+  claude:{rows:["...X...",".X.X.X.","..XXX..","XXXXXXX","..XXX..",".X.X.X.","...X..."],col:()=>"#D9774F"},                 // 橘色放射星
+  hermes:{rows:["X.....X","XX...XX","XXX.XXX",".XXXXX.","..XGX..","...X...","......."],col:(r,c,ch)=>ch==="G"?"#F4C24A":"#4E9C92"}, // 展翅
+  codex:{rows:["BBBBBBB","BGBBBBB","BBGBBBB","BGBBBBB","BBBBGGB","BBBBBBB","......."],col:(r,c,ch)=>ch==="G"?"#9CE6BF":"#2E3440"},   // 終端機 >_
+  gemini:{rows:["...X...","...X...","..XXX..","XXXXXXX","..XXX..","...X...","...X..."],col:(r)=>["#4F7DF0","#5D78EE","#6B73EB","#7E6FE6","#8F6BE2","#9C67DD","#A963D8"][r]}, // 四角閃光
+  antigravity:{rows:["...X...","..XXX..",".XXXXX.","...X...","..XXX..",".X.X.X.","......."],col:(r)=>r<3?"#4A7BD8":"#7FA6E0"},  // 往上飛的箭頭
+  other:{rows:["...X...",".XXXXX.",".X.X.X.",".XXXXX.",".X...X.",".XXXXX.","......."],col:()=>"#8E8597"},                    // 小機器人
+};
+function drawIcon(c,kind,x,y){const ic=ICONS[kind]||ICONS.other;ic.rows.forEach((row,r)=>[...row].forEach((ch,col)=>{if(ch!==".")R(x+col,y+r,1,1,ic.col(r,col,ch))}))}
+// 給 HTML 用的圖示（data URL），網頁上的看板、聊天、詳情面板共用
+const ICON_URL={};
+for(const k of Object.keys(ICONS)){const cv2=document.createElement("canvas");cv2.width=7;cv2.height=7;const prevC=C;C=cv2.getContext("2d");drawIcon(C,k,0,0);C=prevC;ICON_URL[k]=cv2.toDataURL()}
+const iconImg=(kind)=>`<img class="ico" src="${ICON_URL[kind]||ICON_URL.other}" alt="">`;
+
 const spr=document.createElement("canvas");spr.width=32;spr.height=44;const sc=spr.getContext("2d");
 const sil=document.createElement("canvas");sil.width=32;sil.height=44;const sl=sil.getContext("2d");
 function sprite(a,o){
@@ -543,8 +565,11 @@ function drawSprite(target,x,y){const X=Math.round(x)-16,Y=Math.round(y)-40;for(
 let now=0,last=performance.now(),selected=null,hover=null;const papers=[],floaters=[],splashes=[];
 function rr(x,y,w,h,r,fillc,stroke){ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fillStyle=fillc;ctx.fill();if(stroke){ctx.lineWidth=1;ctx.strokeStyle=stroke;ctx.stroke()}}
 function label(a,x,y){
+  // 標籤：狀態燈＋平台小圖示＋自訂名稱
   const st=a.state,col=ST_COLOR[st];ctx.font=`900 7px ${FONT}`;const nw=ctx.measureText(a.name).width;const top=y-35-(a.role==="owner"?3:0);
-  rr(x-nw/2-9,top-8,nw+16,11,5,"rgba(255,248,236,.94)",OL);ctx.beginPath();ctx.arc(x-nw/2-3,top-2.5,2.2,0,7);ctx.fillStyle=col;ctx.fill();txt(a.name,x+3,top+.5,7,"#5E4332","center",900);
+  const w=nw+25,lx=x-w/2;
+  rr(lx,top-8,w,11,5,"rgba(255,248,236,.94)",OL);ctx.beginPath();ctx.arc(lx+5,top-2.5,2.2,0,7);ctx.fillStyle=col;ctx.fill();
+  C=ctx;drawIcon(ctx,a.kind,Math.round(lx+9),Math.round(top-6));txt(a.name,lx+18,top+.5,7,"#5E4332","left",900);
   let b=null;
   if(st==="working")b=a.tool;else if(st==="stalled")b="摸魚中 "+Math.floor(a.stallSec/60)+":"+String(a.stallSec%60).padStart(2,"0");
   else if(st==="error")b="！"+(a.tool||"出錯了");else if(st==="waiting")b="等你批准";else if(st==="queued")b=a.tool||"排隊中";else if(st==="review")b=a.tool||"開會中";else if(st==="done")b="完成！";
@@ -715,7 +740,7 @@ function renderBoard() {
       const c = document.createElement("div"); c.className = "card";
       c.style.setProperty("--c", { todo: "var(--st-queued)", doing: "var(--st-working)", done: "var(--st-done)", fail: "var(--st-error)" }[key]);
       const who = t.assignee ? accounts.find((a) => a.username === t.assignee) : null;
-      let meta = `<span class="tag"><i class="av ${who?.kind || ""}"></i>${esc(nameOf(t.assignee))}</span><span class="tag">目標 #${t.goal_id}</span>`;
+      let meta = `<span class="tag">${iconImg(who?.kind)}${esc(nameOf(t.assignee))}</span><span class="tag">目標 #${t.goal_id}</span>`;
       if (t.status === "blocked") meta += `<span class="tag">等 ${t.depends_on.map((d) => "#" + d).join("、")}</span>`;
       if (t.status === "doing" && t.lease_until) meta += `<span class="mono">租約 ${fmtTime(t.lease_until * 1000)}</span>`;
       if (t.verify) meta += `<span class="mono">驗收 ${esc(t.verify.slice(0, 40))}</span>`;
@@ -735,6 +760,7 @@ function renderBoard() {
   }
 }
 const nameOf = (u) => accounts.find((a) => a.username === u)?.first_name || u || "—";
+const kindOf = (u) => accounts.find((a) => a.username === u)?.kind || "other";
 
 document.addEventListener("click", async (e) => {
   const cp = e.target.closest("[data-copy]");
@@ -785,7 +811,7 @@ function renderChat() {
     const btns = m.buttons?.inline_keyboard ? `<div class="btns">${m.buttons.inline_keyboard.flat().filter((b) => b.callback_data).map((b) => `<button class="btn sm" type="button" data-act="press" data-chat="${accounts.find((a) => a.username === m.from)?.id}" data-mid="${m.mid}" data-data="${esc(b.callback_data)}">${esc(b.text)}</button>`).join("")}</div>` : "";
     const file = m.media ? `<a class="tag" href="/file/user${encodeURIComponent(TOKEN)}/${encodeURIComponent(m.media.file_id)}/" target="_blank" rel="noopener">📎 ${m.media.kind === "photo" ? "圖片" : "檔案"}</a>` : "";
     const dt = m.data?.type ? `<span class="tag">${esc(m.data.type)}${m.data.task_id ? " #" + m.data.task_id : ""}</span>` : "";
-    return `<div class="msg ${isMe ? "mine" : ""} ${m.isBot ? "bot" : ""}"><div class="mh"><b>${esc(m.fromName)}</b>${m.thread ? `<span class="tag">目標 #${m.thread}</span>` : ""}${dt}<span class="mono">${fmtTime(m.ts)}${m.edited ? " · 已編輯" : ""}</span>${peer ? "" : ""}</div><div class="mt">${esc(m.text)}</div>${file}${btns}</div>`;
+    return `<div class="msg ${isMe ? "mine" : ""} ${m.isBot ? "bot" : ""}"><div class="mh">${m.isBot ? iconImg(kindOf(m.from)) : ""}<b>${esc(nameOf(m.from) || m.fromName)}</b>${m.thread ? `<span class="tag">目標 #${m.thread}</span>` : ""}${dt}<span class="mono">${fmtTime(m.ts)}${m.edited ? " · 已編輯" : ""}</span>${peer ? "" : ""}</div><div class="mt">${esc(m.text)}</div>${file}${btns}</div>`;
   }).join("") : `<p class="hint">還沒有訊息。</p>`;
   if (atBottom) box.scrollTop = box.scrollHeight;
   const pending = feed.filter((m) => !m.key?.startsWith("g:") && m.buttons?.inline_keyboard).length;
@@ -826,7 +852,9 @@ function renderDrawer() {
   sprite(a, { face: "down" });
   const av = $("#dAvatar").getContext("2d"); av.imageSmoothingEnabled = false; av.clearRect(0, 0, 24, 30);
   for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) av.drawImage(sil, -4 + dx, -12 + dy); av.drawImage(spr, -4, -12);
-  $("#dName").textContent = a.name + (u ? "" : "（未設定帳號）");
+  $("#dName").innerHTML = (u ? iconImg(a.kind) + " " : "") + esc(a.name) + (u ? "" : "（空位）");
+  $("#renameForm").hidden = !u;
+  if (document.activeElement !== $("#renameInput")) $("#renameInput").value = u ? a.name : "";
   $("#dMeta").innerHTML = `<span class="pill" style="--st:${ST_COLOR[a.state]}">${STATES[a.state] || a.state}</span>` + (a.role ? `<span class="role${a.role === "reviewer" ? " rev" : ""}">${a.role === "owner" ? "主管" : "審查"}</span>` : "") +
     `<span>${a.machine ?? "?"} 機 · ${({ claude: "Claude Code", hermes: "Hermes", codex: "Codex CLI", gemini: "Gemini CLI", antigravity: "Antigravity CLI" })[a.kind] || a.kind || "—"}${a.kind === "claude" && a.sessionUp === false ? " · session 沒在跑" : ""}</span>`;
   $("#dNow").innerHTML = `<span>${s?.task ? `<b>#${s.task.task_id} ${esc(s.task.title)}</b>` : "沒有進行中的任務"}</span><span class="where">現在位置：${PLACE[a.state] || ""}</span>` +
@@ -836,6 +864,27 @@ function renderDrawer() {
   $("#dStream").scrollTop = 1e6;
   const myTasks = hubTasks.filter((t) => t.assignee === u && ["todo", "doing", "blocked"].includes(t.status));
   $("#dTasks").innerHTML = myTasks.length ? myTasks.map((t) => `<li><span class="mono">#${t.task_id}</span><span>${esc(t.title)}（${t.status}）</span></li>`).join("") : "<li>沒有</li>";
+}
+
+$("#renameForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const u = userOf[selected], name = $("#renameInput").value.trim();
+  if (!u || !name) return;
+  try { await api("renameAccount", { username: u, name }); $("#renameInput").blur(); toast(`已改名為「${name}」`, "#5DB585"); }
+  catch (err) { toast(err.message, "#E0675A"); }
+});
+function renderLeadSelect() {
+  const cur = $("#leadSelect").value;
+  $("#leadSelect").innerHTML = `<option value="auto">自動</option>` + accounts.filter((a) => a.kind === "claude").map((a) => `<option value="${a.username}">${esc(a.first_name)}</option>`).join("");
+  if ([...$("#leadSelect").options].some((o) => o.value === cur)) $("#leadSelect").value = cur;
+}
+function applyRename(p) {
+  const acc = accounts.find((a) => a.id === p.id);
+  if (acc) acc.first_name = p.first_name;
+  const slot = slotOf[p.username];
+  if (slot) agents[slot].name = p.first_name;
+  if (ME && p.id === ME.id) { ME.name = p.first_name; $("#me").textContent = `${ME.name}（@${ME.username}）`; }
+  renderBoard(); renderChat(); renderLeadSelect(); if (selected) renderDrawer();
 }
 
 /* ---------- 事件 ---------- */
@@ -880,6 +929,7 @@ function handleEvent(ev) {
       else if (prev.status !== p.status && p.status !== "doing") { toast(`🏁 目標 #${p.goal_id} ${p.status === "done" ? "完成" : p.status}`, "#E8B830"); notify(`目標 #${p.goal_id} ${p.status === "done" ? "完成" : p.status}`, p.summary || p.title); }
       renderBoard(); refreshThreads(); break;
     }
+    case "account": applyRename(p); break;
     case "button_answer": if (p.to === ME?.id && p.text) toast(p.text, "#5DB585"); break;
     case "loop_guard": toast(`防循環：bot 在目標 #${p.thread_id || "-"} 互相回太多次，等你發言`, "#E0A43A"); break;
   }
@@ -901,7 +951,7 @@ function applySnapshot(s) {
     else if (ev.type === "hook") { const a = accounts.find((x) => x.id === ev.actor_id); if (a && ev.payload.detail) (agentLog[slotOf[a.username]] ||= []).push({ t: ev.ts, k: "ok", s: `${ev.payload.event} · ${ev.payload.detail}` }); }
   }
   for (const [u, st] of Object.entries(s.agents)) applyAgent(u, st, false);
-  $("#leadSelect").innerHTML = `<option value="auto">自動</option>` + accounts.filter((a) => a.kind === "claude").map((a) => `<option value="${a.username}">${esc(a.first_name)}</option>`).join("");
+  renderLeadSelect();
   $("#me").textContent = `${ME.name}（@${ME.username}）`;
   for (const [slot, a] of Object.entries(agents)) if (!userOf[slot]) { a.name = "空位"; a.kind = null; } // 沒有帳號的工位
   renderBoard(); renderChat(); refreshThreads(); renderLegend();

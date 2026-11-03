@@ -444,6 +444,20 @@ export const methods: Record<string, Method> = {
     return true;
   },
 
+  /** 顯示名稱（Telegram 相容：bot 改自己的名字） */
+  setMyName(ctx, p) {
+    return renameAccount(ctx, ctx.me, str(p.name));
+  },
+
+  /** 擴充（真人與 UI 用）：改任何帳號的顯示名稱 */
+  renameAccount(ctx, p) {
+    if (ctx.me.is_bot) throw new ApiError(403, "Forbidden: only humans can rename other accounts");
+    const u = str(p.username)?.replace(/^@/, "");
+    const target = u ? ctx.db.query("SELECT * FROM accounts WHERE username = ?").get(u) as Account | null : null;
+    if (!target) throw new ApiError(400, "Bad Request: account not found");
+    return renameAccount(ctx, target, str(p.name));
+  },
+
   setMyCommands(ctx, p) {
     const commands = json(p.commands, "commands");
     if (!Array.isArray(commands)) throw new ApiError(400, "Bad Request: commands must be an array");
@@ -481,6 +495,14 @@ export const methods: Record<string, Method> = {
   logOut: () => true,
   close: () => true,
 };
+
+function renameAccount(ctx: Ctx, target: Account, raw: string | undefined) {
+  const name = (raw ?? "").replace(/[\r\n\t]/g, " ").trim();
+  if (!name || [...name].length > 24) throw new ApiError(400, "Bad Request: name must be 1-24 characters");
+  ctx.db.query("UPDATE accounts SET first_name = ? WHERE id = ?").run(name, target.id);
+  logEvent(ctx.db, "account", ctx.me.id, null, { id: target.id, username: target.username, first_name: name, kind: target.kind, machine: target.machine, is_bot: !!target.is_bot });
+  return true;
+}
 
 export function registerMethods(extra: Record<string, Method>) {
   Object.assign(methods, extra);
