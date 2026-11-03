@@ -20,8 +20,9 @@ description: 把一個目標交給 AI 辦公室團隊：你當主管，拆解成
 先在心裡列出完成目標需要的步驟，再為每一步呼叫 `office_assign`。原則：
 
 - **Hermes（目前只有 hermes_a，跑在 A 機的 Windows）是本地小模型**：只給「單一、具體、可驗證」的工作，例如一個指令、搬檔、排程、查 log、整理成表格。**一定要給 `verify`**：一個結束碼 0 就代表完成的指令。
-  - 它在 Windows 上：路徑用 Windows 格式（`D:\data\a.csv`），指令用 PowerShell 或 cmd。
-  - `verify` 由 cmd.exe 執行，在任務的工作目錄裡跑；複雜的檢查用 PowerShell。
+  - 它在 Windows 上：路徑用 Windows 格式（`D:\data\a.csv`）。
+  - **說明要寫「要什麼結果」，不要寫死「用什麼指令」**：Hermes 有自己的安全規則，可能擋下 PowerShell 等指令（A 機實測：它擋掉 PowerShell，改用 `df`／`awk` 拿到一樣的結果）。可以附建議做法，但寫明「做法不限，結果對就好」。真正把關的是 `verify`。
+  - `verify` 由 office-node 用 cmd.exe 執行（不經過 Hermes，不受它的安全規則限制），在任務的工作目錄裡跑；複雜的檢查用 PowerShell。
   - **驗收必須檢查內容，不能只看檔案存在**（`dir`、`if exist` 等於沒檢查）。要驗證的是「結果對不對」：內容包含預期的字、行數或欄位對、數值在合理範圍、指令輸出符合預期。例如：
     - `powershell -NoProfile -Command "$c = Get-Content out\report.csv; if ($c.Count -ge 2 -and $c[0] -match 'name,size') { exit 0 } else { exit 1 }"`
     - `powershell -NoProfile -Command "if ((Get-Content D:\office-test\hello.txt -Raw) -match (Get-Date -Format 'yyyy-MM-dd')) { exit 0 } else { exit 1 }"`

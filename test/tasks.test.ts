@@ -145,6 +145,9 @@ describe("桌面版主管（沒有頻道）", () => {
     await ok("hermes_a", "reportTask", { task_id: t.task_id, status: "done", result: "好了" });
     const w = await waiting;
     expect(w.done).toBe(false);
+    // 等回報期間算活動：沒有 hooks 的主管顯示為開會／審查
+    const st = (await ok("boss", "getAgents")).find((a: any) => a.username === "claude_a");
+    expect(st).toMatchObject({ state: "review", detail: `等回報：目標 #${g.goal_id}` });
     expect(w.messages.some((m: any) => m.data?.type === "report" && m.data?.task_id === t.task_id)).toBe(true);
     await ok("claude_a", "completeGoal", { goal_id: g.goal_id, summary: "完成" });
     const end = await ok("claude_a", "waitEvents", { goal_id: g.goal_id, timeout: 10 });
