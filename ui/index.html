@@ -155,6 +155,13 @@ a.tag{text-decoration:none}
 .dtasks{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:12px}
 .dtasks li{display:flex;gap:8px}
 .stream .state{color:#F4C77A}
+.fsbtn{font-family:var(--f-round);font-weight:700;font-size:12px;color:#3E2E23;background:#EAD9C0;border:2px solid #3E2E23;border-radius:8px;padding:2px 10px;cursor:pointer}
+.fsbtn:hover{background:#F6E7CE}
+.stage:fullscreen{border:0;border-radius:0;box-shadow:none;background:#3A2C22;width:100vw;height:100vh;box-sizing:border-box;padding:10px max(10px,env(safe-area-inset-right,0px)) 10px max(10px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px}
+.stage:fullscreen .scroller{overflow:hidden;width:100%;flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
+.stage:fullscreen #game{min-width:0;width:min(100%,calc((100vh - 64px) * 1.6));height:auto}
+.stage:fullscreen .stage-bar{width:100%}
+.stage:fullscreen .swipe{display:none}
 .trace{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted);background:var(--panel-2);border-radius:6px;padding:4px 6px}
 .trace span{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
 .trace code{font-family:var(--f-mono);color:var(--ink);overflow-wrap:anywhere}
@@ -179,7 +186,7 @@ a.tag{text-decoration:none}
 
   <section class="stage" aria-label="辦公室畫面">
     <div class="scroller"><canvas id="game" aria-label="像素辦公室，點角色可看詳情"></canvas></div>
-    <div class="stage-bar"><span>點角色看動態與任務 · 角色會依狀態走到不同房間</span><span class="swipe">← 左右滑動 →</span></div>
+    <div class="stage-bar"><span>點角色看動態與任務 · 角色會依狀態走到不同房間 · 小黑是辦公室的狗</span><span class="swipe">← 左右滑動 →</span><button class="fsbtn" type="button" id="fsBtn" title="全螢幕（F）">⛶ 全螢幕</button></div>
   </section>
 
   <div class="legend" id="legend"></div>
@@ -433,7 +440,11 @@ const SPOTS={
   exit:{tx:4,ty:29,x:4.5,y:29.4,face:"down",exit:1}
 };
 for(const id of Object.keys(desks)){const d=desks[id];SPOTS["seat-"+id]={tx:d.dx+2,ty:d.dy-1,x:d.dx+2.5,y:d.dy+0.25,face:"down",sit:1,desk:1}}
-const IDLE=["coffee","arcade1","sofa1","pongL","tableT","water","bean1","arcade2","sofa2","tableL","bean2","tableR","sofa3"];
+SPOTS.books={tx:22,ty:20,x:22.5,y:20.8,face:"up"};      // 看書架
+SPOTS.printer={tx:22,ty:14,x:22.6,y:14.8,face:"up"};    // 影印機旁
+SPOTS.petcat={tx:13,ty:25,x:13.6,y:25.6,face:"left"};   // 摸摸貓
+SPOTS.window={tx:3,ty:3,x:3.6,y:3.7,face:"up"};          // 工作區窗邊發呆
+const IDLE=["coffee","arcade1","sofa1","pongL","tableT","water","bean1","arcade2","sofa2","tableL","bean2","tableR","sofa3","books","printer","petcat","window"];
 const claimed={};
 function occupant(spot){const id=claimed[spot];if(!id)return null;const a=agents[id];return a.spot===spot&&a.arrived?a:null}
 function pickSpot(id){
@@ -444,7 +455,11 @@ function pickSpot(id){
   if(s==="stalled")return free(["fish1","fish2","fish3","fish4"]);
   if(s==="offline")return"exit";
   if(claimed.pongL&&!claimed.pongR&&claimed.pongL!==id)return"pongR";
-  const opts=IDLE.filter(k=>!claimed[k]||claimed[k]===id);return opts[(a.idleSeed++)%opts.length];
+  // 閒暇時隨機挑一個「別人沒占、也不是現在這個」的地點
+  const opts=IDLE.filter(k=>(!claimed[k]||claimed[k]===id));
+  const fresh=opts.filter(k=>k!==a.lastIdle);
+  const pick=(fresh.length?fresh:opts)[Math.floor(Math.random()*(fresh.length?fresh:opts).length)];
+  a.lastIdle=pick;return pick;
 }
 function bfs(sx,sy,tx,ty){
   if(sx===tx&&sy===ty)return[];const prev=new Map(),key=(x,y)=>y*W+x,q=[[sx,sy]];prev.set(key(sx,sy),null);
@@ -525,6 +540,7 @@ function frame(t){
   drawPond();
   const list=objs.map(o=>({z:o.z,f:o.draw}));
   for(const a of Object.values(agents)){if(a.hidden)continue;list.push({z:a.y*T,f:()=>drawAgent(a)})}
+  if(typeof petTick==="function"){petTick(dt);list.push({z:pet.y*T,f:drawPet})}
   list.sort((p,q)=>p.z-q.z);for(const o of list)o.f();
   // fishing lines & bobbers
   for(const a of Object.values(agents)){const S=SPOTS[a.spot];if(a.hidden||!a.arrived||!S||!S.fish)continue;
@@ -547,6 +563,7 @@ function frame(t){
   ctx.globalCompositeOperation="source-over";
   const vg=ctx.createRadialGradient(W*T/2,H*T/2,H*T*.45,W*T/2,H*T/2,W*T*.62);vg.addColorStop(0,"rgba(90,55,30,0)");vg.addColorStop(1,"rgba(90,55,30,.2)");ctx.fillStyle=vg;ctx.fillRect(0,0,W*T,H*T);
   for(const a of Object.values(agents))if(!a.hidden)label(a,a.x*T,a.y*T+(SPOTS[a.spot]?.sit&&a.arrived?2:0));
+  if(typeof drawPetBubble==="function")drawPetBubble();
   if(selected&&!agents[selected].hidden){const a=agents[selected];ctx.strokeStyle="#F4C24A";ctx.lineWidth=1.2;ctx.beginPath();ctx.ellipse(a.x*T,a.y*T,9+Math.sin(now*5),3,0,0,7);ctx.stroke()}
   for(let i=papers.length-1;i>=0;i--){const p=papers[i];p.t+=dt/1.3;if(p.t>=1){papers.splice(i,1);p.done&&p.done();continue}
     const f=agents[p.from],to=agents[p.to],x0=f.x*T,y0=f.y*T-18,x1=to.x*T,y1=to.y*T-18,x=x0+(x1-x0)*p.t,y=y0+(y1-y0)*p.t-Math.sin(p.t*Math.PI)*40;
@@ -854,7 +871,7 @@ function applySnapshot(s) {
   for (const [u, st] of Object.entries(s.agents)) applyAgent(u, st, false);
   $("#leadSelect").innerHTML = `<option value="auto">自動</option>` + accounts.filter((a) => a.kind === "claude").map((a) => `<option value="${a.username}">${esc(a.first_name)}</option>`).join("");
   $("#me").textContent = `${ME.name}（@${ME.username}）`;
-  for (const [slot, a] of Object.entries(agents)) if (!userOf[slot]) { a.name = a.name + "（未設定）"; }
+  for (const [slot, a] of Object.entries(agents)) if (!userOf[slot]) { a.name = "空位"; } // 沒有帳號的工位（例如目前只有一個 Hermes）
   renderBoard(); renderChat(); refreshThreads(); renderLegend();
 }
 
@@ -895,14 +912,136 @@ $("#notifyBtn").textContent = notifyOn ? "🔔 通知開" : "🔕 通知關";
 // 卡住秒數每秒更新
 setInterval(() => { for (const [u, s] of Object.entries(hubAgents)) { const slot = slotOf[u]; if (slot && s.last_activity) agents[slot].stallSec = Math.floor((Date.now() - s.last_activity) / 1000); } }, 1000);
 
+/* ---------- 閒暇時隨機走動 ---------- */
+// 只有「空閒」的人會隔一陣子換地方；忙碌、開會、排隊、等批准、卡住（釣魚）、報錯都留在原地
+setInterval(() => {
+  const t = Date.now();
+  for (const [id, a] of Object.entries(agents)) {
+    if (a.state !== "idle" || a.hidden || a.path.length || !a.arrived) { a.nextWander = 0; continue; }
+    if (!a.nextWander) { a.nextWander = t + 20000 + Math.random() * 25000; continue; }
+    if (t >= a.nextWander) { a.nextWander = 0; retarget(id, false); }
+  }
+}, 1000);
+
+/* ---------- 辦公室的狗：小黑 ---------- */
+const pet = { x: 13.5, y: 26.5, path: [], face: "right", walkT: 0, mode: "sit", timer: 3, bubble: "", bubbleT: 0, speed: 3, goal: null };
+const EMOTES = ["❤", "♪", "？", "！", "汪!", "🦴", "✨", "🐾", "😆", "🥺", "💤", "嗚~"];
+function petRandomTile() {
+  for (let i = 0; i < 300; i++) {
+    const x = 1 + Math.floor(Math.random() * (W - 2)), y = 3 + Math.floor(Math.random() * (H - 4));
+    if (walk[y]?.[x] && tile[y][x] !== "exit" && tile[y][x] !== "door") return [x, y];
+  }
+  return [13, 26];
+}
+function petEmote(e, sec = 2.5) { pet.bubble = e || EMOTES[Math.floor(Math.random() * EMOTES.length)]; pet.bubbleT = sec; }
+function petGo(tx, ty, speed = 3, goal = null) {
+  const sx = Math.floor(pet.x), sy = Math.floor(pet.y);
+  pet.path = bfs(sx, sy, tx, ty); pet.speed = speed; pet.goal = goal; pet.mode = "walk";
+  if (!pet.path.length) { pet.mode = "sit"; pet.timer = 2; }
+}
+function petTick(dt) {
+  pet.timer -= dt; if (pet.bubbleT > 0) pet.bubbleT -= dt;
+  if (pet.path.length) {
+    const [tx, ty] = pet.path[0], dx = tx - pet.x, dy = ty - pet.y, d = Math.hypot(dx, dy), sp = pet.speed * dt;
+    if (Math.abs(dx) > 0.01) pet.face = dx > 0 ? "right" : "left";
+    if (d <= sp) { pet.x = tx; pet.y = ty; pet.path.shift(); } else { pet.x += dx / d * sp; pet.y += dy / d * sp; }
+    pet.walkT += dt;
+    if (!pet.path.length) {
+      pet.mode = "sit"; pet.timer = 3 + Math.random() * 6;
+      if (pet.goal) { const a = agents[pet.goal]; if (a && !a.hidden) { pet.face = a.x > pet.x ? "right" : "left"; petEmote(Math.random() < .6 ? "❤" : "汪!"); } pet.goal = null; }
+    }
+    return;
+  }
+  if (pet.mode === "sleep" && pet.timer > 0) { if (pet.bubbleT <= 0 && Math.random() < dt * .3) petEmote("💤", 2); return; }
+  if (pet.timer > 0) { if (pet.bubbleT <= 0 && Math.random() < dt * .04) petEmote(); return; }
+  const r = Math.random();
+  const people = Object.entries(agents).filter(([, a]) => !a.hidden);
+  if (r < .5) { const [x, y] = petRandomTile(); petGo(x, y, Math.random() < .25 ? 5.5 : 2.6); }
+  else if (r < .75 && people.length) {
+    const [id, a] = people[Math.floor(Math.random() * people.length)];
+    const tx = Math.floor(a.x) + (Math.random() < .5 ? 1 : -1), ty = Math.min(H - 2, Math.floor(a.y) + 1);
+    if (walk[ty]?.[tx]) petGo(tx, ty, 4, id); else { const [x, y] = petRandomTile(); petGo(x, y, 2.6); }
+  }
+  else if (r < .9) { pet.mode = "sit"; pet.timer = 4 + Math.random() * 5; petEmote(); }
+  else { pet.mode = "sleep"; pet.timer = 10 + Math.random() * 10; petEmote("💤", 2); }
+}
+function drawPet() {
+  const x = Math.round(pet.x * T), y = Math.round(pet.y * T), L = pet.face === "left";
+  const px = (dx, dy, w, h, c) => R(L ? x - dx - w : x + dx, y + dy, w, h, c); // 以臉的方向左右翻轉
+  const body = "#2B2A33", hi = "#45434F", dark = "#18171D", moving = pet.path.length > 0;
+  R(x - 7, y - 1, 14, 2, "rgba(110,70,40,.22)");
+  if (pet.mode === "sleep" && !moving) {
+    px(-7, -5, 14, 5, body); px(-6, -6, 10, 2, hi); px(4, -6, 5, 5, body); px(6, -7, 2, 2, dark); px(7, -3, 1, 1, "#E9A28E"); px(-9, -3, 3, 2, body); return;
+  }
+  const step = moving ? (Math.floor(pet.walkT * 10) % 2) : 0, sit = pet.mode === "sit" && !moving;
+  const wag = Math.round(Math.sin(now * (moving ? 18 : 9)) * 1.5);
+  px(-8, -9 + wag, 2, 4, body); px(-9, -11 + wag, 2, 3, body);                        // 尾巴
+  if (sit) { px(-6, -8, 9, 6, body); px(-6, -3, 3, 3, body); px(1, -3, 2, 3, body); px(-5, -8, 6, 1, hi); }
+  else { px(-6, -7, 11, 5, body); px(-5, -7, 8, 1, hi);                              // 身體
+    px(-5, -2, 2, step ? 2 : 3, dark); px(-2, -2, 2, step ? 3 : 2, dark); px(2, -2, 2, step ? 2 : 3, dark); px(4, -2, 1, step ? 3 : 2, dark); }
+  const hy = sit ? -14 : -12;
+  px(2, hy, 7, 6, body); px(3, hy, 4, 1, hi);                                          // 頭
+  px(2, hy - 2, 2, 3, dark); px(6, hy - 2, 2, 3, dark);                                // 耳朵
+  px(8, hy + 3, 3, 3, body); px(10, hy + 3, 1, 1, "#0E0E12");                          // 嘴、鼻子
+  px(6, hy + 2, 1, 1, "#FFFFFF");                                                      // 眼睛亮點
+  if (pet.bubbleT > 0 && (pet.bubble === "❤" || pet.bubble === "😆")) px(9, hy + 5, 1, 2, "#E8A3A0"); // 舌頭
+  px(2, hy + 6, 6, 1, "#E0675A");                                                      // 紅項圈
+}
+function drawPetBubble() {
+  const x = pet.x * T, y = pet.y * T;
+  if (hover === "pet" || pet.bubbleT > 0) {
+    ctx.font = `900 6px ${FONT}`;
+    const nw = ctx.measureText("小黑").width;
+    rr(x - nw / 2 - 4, y + 2, nw + 8, 8, 4, "rgba(255,248,236,.9)", OL); txt("小黑", x, y + 8, 6, "#5E4332", "center", 900);
+  }
+  if (pet.bubbleT <= 0) return;
+  const a = Math.min(1, pet.bubbleT * 2), by = y - 30 - (1 - Math.min(1, (2.5 - pet.bubbleT) * 4)) * 4;
+  ctx.globalAlpha = a;
+  ctx.font = `900 9px ${FONT}`;
+  const w = Math.max(16, ctx.measureText(pet.bubble).width + 8);
+  rr(x - w / 2, by, w, 13, 6, "#FFFFFF", OL);
+  ctx.fillStyle = "#FFFFFF"; ctx.beginPath(); ctx.moveTo(x - 3, by + 12.5); ctx.lineTo(x + 3, by + 12.5); ctx.lineTo(x, by + 16); ctx.fill();
+  txt(pet.bubble, x, by + 10, 9, "#5E4332", "center", 900);
+  ctx.globalAlpha = 1;
+}
+const petHit = (p) => Math.abs(p.x - pet.x * T) < 10 && p.y > pet.y * T - 16 && p.y < pet.y * T + 3;
+
+/* ---------- 辦公室畫面全螢幕 ---------- */
+const stageEl = document.querySelector(".stage");
+const fsBtn = $("#fsBtn");
+function isFull() { return document.fullscreenElement === stageEl || document.webkitFullscreenElement === stageEl; }
+async function toggleFull() {
+  try {
+    if (isFull()) await (document.exitFullscreen?.() ?? document.webkitExitFullscreen?.());
+    else await (stageEl.requestFullscreen?.() ?? stageEl.webkitRequestFullscreen?.());
+  } catch { toast("這個瀏覽器不允許全螢幕", "#E0675A"); }
+}
+function onFullChange() {
+  const full = isFull();
+  fsBtn.textContent = full ? "✕ 離開全螢幕" : "⛶ 全螢幕";
+  // 全螢幕時只會畫出 .stage 裡面的東西：把角色詳情面板與通知搬進來，離開時放回去
+  const home = document.body;
+  for (const id of ["drawer", "toasts"]) { const el = document.getElementById(id); (full ? stageEl : home).appendChild(el); }
+}
+fsBtn.addEventListener("click", toggleFull);
+document.addEventListener("fullscreenchange", onFullChange);
+document.addEventListener("webkitfullscreenchange", onFullChange);
+document.addEventListener("keydown", (e) => {
+  if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !e.altKey && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || "")) { e.preventDefault(); toggleFull(); }
+});
+
 /* ---------- 啟動 ---------- */
 function toast(msg, color) { const t = document.createElement("div"); t.className = "toast card-px"; t.innerHTML = `<i style="background:${color}"></i><span>${esc(msg)}</span>`; $("#toasts").appendChild(t); setTimeout(() => t.remove(), 4500); }
 function renderLegend() { $("#legend").innerHTML = Object.entries(STATES).map(([k, l]) => `<div class="lg"><i style="background:${ST_COLOR[k]}"></i><b>${l}</b><span>→ ${PLACE[k]}</span></div>`).join(""); }
 function toLogical(e) { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W * T, y: (e.clientY - r.top) / r.height * H * T }; }
 function hit(p) { let best = null, bd = 1e9; for (const [id, a] of Object.entries(agents)) { if (a.hidden) continue; const x = a.x * T, y = a.y * T; if (p.x > x - 10 && p.x < x + 10 && p.y > y - 38 && p.y < y + 3) { const d = Math.abs(p.y - (y - 14)); if (d < bd) { bd = d; best = id; } } } return best; }
-cv.addEventListener("click", (e) => { const id = hit(toLogical(e)); if (id) openDrawer(id); });
-cv.addEventListener("mousemove", (e) => { hover = hit(toLogical(e)); cv.style.cursor = hover ? "pointer" : "default"; });
-function setState(id, s) { const a = agents[id]; if (a.state === s) return; a.state = s; retarget(id, false); if (selected === id) renderDrawer(); }
+cv.addEventListener("click", (e) => {
+  const p = toLogical(e);
+  if (petHit(p)) { petEmote(["汪!", "❤", "🐾", "😆"][Math.floor(Math.random() * 4)]); if (!pet.path.length) { pet.mode = "sit"; pet.timer = 4; } return; }
+  const id = hit(p); if (id) openDrawer(id);
+});
+cv.addEventListener("mousemove", (e) => { const p = toLogical(e); hover = petHit(p) ? "pet" : hit(p); cv.style.cursor = hover ? "pointer" : "default"; });
+function setState(id, s) { const a = agents[id]; if (a.state === s) return; a.state = s; a.nextWander = 0; retarget(id, false); if (selected === id) renderDrawer(); }
 
 for (const id of Object.keys(agents)) retarget(id, true);
 renderLegend(); renderBoard(); buildBG();
