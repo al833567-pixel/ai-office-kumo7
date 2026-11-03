@@ -24,7 +24,7 @@
 | `claude/` | Claude Code 本機 marketplace：`office` 頻道外掛（改寫自官方 Telegram 外掛）＋ `/office` skill |
 | `node/` | 每台 agent 機器用的 `office` 指令（Hermes 接線、檔案上傳下載、設定 Claude） |
 | `scripts/windows/`、`scripts/linux/` | 啟動腳本與開機常駐：Windows 工作排程器、Linux／WSL systemd |
-| `docs/平台相容.md` | 各平台（Claude、Hermes、Codex、Gemini、Antigravity）當櫃台／主管／執行者的接法與 Windows／Linux 對照 |
+| `docs/平台相容.md` | 各平台（Claude、Hermes、Codex、Antigravity）當櫃台／主管／執行者的接法與 Windows／Linux 對照 |
 | `test/` | 56 項測試（含真正的 grammY、官方 MCP SDK、外掛端對端、假 Hermes 全流程），Windows 與 Linux 都能跑 |
 
 ## 需求
@@ -107,7 +107,7 @@ A 機的 Hermes 是 Windows 原生版（`%LOCALAPPDATA%\hermes\bin\hermes.exe`�
 ]
 ```
 
-舊版寫法（`hermes_token` 加 `hermes` 區塊）仍然有效，不必改。之後要在同一台加 Codex、Gemini 等其他執行者，就在 `workers` 多加一段，見 [docs/平台相容.md](docs/平台相容.md)。
+舊版寫法（`hermes_token` 加 `hermes` 區塊）仍然有效，不必改。之後要在同一台加 Codex、Antigravity 等其他執行者，就在 `workers` 多加一段，見 [docs/平台相容.md](docs/平台相容.md)。
 
 - **用絕對路徑**：工作排程器啟動時的 PATH 可能和你的終端機不同，寫完整路徑最穩。`%LOCALAPPDATA%`、`~` 會自動展開，不必寫死使用者名稱。
 - **`--query-file {prompt_file}`**：office-node 把提示詞寫成暫存檔，`{prompt_file}` 換成它的路徑。這樣可以避開 Windows 命令列的長度上限，也不會被換行或引號弄壞。
@@ -253,13 +253,13 @@ powershell -ExecutionPolicy Bypass -File scripts\windows\install-tasks.ps1 -Node
 office ask "整理兩台電腦的磁碟使用量，做成表格" --download ./結果
 ```
 
-Hermes、Codex、Gemini 等支援 MCP 的平台也能當櫃台（接 Hub 的 `/mcp`，用 `office_new_goal` 加 `office_wait`），見 [docs/平台相容.md](docs/平台相容.md)。自動規則：目標提到哪台機器就給那台的 Claude → 誰空閒 → 手上工作最少。
+Hermes、Codex、Antigravity 等支援 MCP 的平台也能當櫃台（接 Hub 的 `/mcp`，用 `office_new_goal` 加 `office_wait`），見 [docs/平台相容.md](docs/平台相容.md)。自動規則：目標提到哪台機器就給那台的 Claude → 誰空閒 → 手上工作最少。
 
 ### UI
 
 - **辦公室**：最多 8 個工位，依帳號自動分配（一台 8 個或 8 台各 1 個都可以），不同平台有不同造型；角色依狀態走到不同地方；空閒的人每隔 20～45 秒會隨機換個休閒地點（茶水間、娛樂室、沙發、書架、窗邊、摸貓…），忙碌中的人留在原地。點角色看動態（hooks、訊息、任務）
-- **名稱與圖示**：每個 agent 頭上與桌上的名牌是「平台小圖示＋自訂名稱」（Claude 橘色放射星、Hermes 展翅、Codex 終端機、Gemini 四角閃光、Antigravity 向上箭頭、其他平台小機器人；都是自己畫的辨識圖，不是官方商標）。點角色後在詳情面板改名，或用 `bun run cli rename <帳號> <名稱>`，最多 24 字
-- **小黑**：辦公室的黑色小狗，會亂逛、找人撒嬌、坐下、睡覺，偶爾冒出表情；點牠會有反應
+- **名稱與圖示**：每個 agent 頭上與桌上的名牌是「公司標誌＋自訂名稱」：Claude（Anthropic 橘色放射星）、Codex（OpenAI 螺旋花瓣）、Hermes（Nous Research 標誌，綠色底）、Antigravity（Google 漸層拱形）、其他平台小機器人。圖示來源與授權見 `ui/icons/NOTICE.md`；想換成自己的圖（例如 Hermes 桌面版的圖示），把檔案放在 `data/icons/<種類>.png`。點角色後在詳情面板改名，或用 `bun run cli rename <帳號> <名稱>`，最多 24 字
+- **小黑**：辦公室的黑色小狗，會亂逛、找人撒嬌、坐下，想睡覺時走回休息區左下角的狗窩睡，偶爾冒出表情；點牠會有反應
 - **全螢幕**：辦公室畫面下方的「⛶ 全螢幕」或按 `F`，只放大辦公室畫面（不含看板與聊天）；`Esc` 或「✕ 離開全螢幕」離開
 - **目標與任務**：看板；可以中止、重跑、改派
 - **聊天**：office 群組（可選目標討論串，@ 人會叫到他）；「私訊／批准」裡有 Claude 送來的權限按鈕
@@ -349,7 +349,7 @@ Hermes、Codex、Gemini 等支援 MCP 的平台也能當櫃台（接 Hub 的 `/m
 - 同一台機器同時開多個 office session 會共用同一個 Claude 帳號，請只開一個
 - 目前只有一個 Hermes（A 機 Windows）；B 機的檔案工作要派給 Claude-B，或先把檔案傳到 A 機
 - 辦公室畫面最多 8 個工位；第 9 個以後的帳號仍能派工、聊天，只是不出現在畫面上
-- Codex、Gemini、Antigravity 的接法已預留但未實測；Gemini CLI 已停止服務個人用戶（改用 Antigravity CLI）
+- Codex、Antigravity 的接法已預留但未實測
 - 桌面版 Hermes.exe 與 CLI 共用同一份 Hermes 設定；office-node 每個任務各執行一次 CLI，不會動到桌面版的對話
 - Hub 在家裡電腦，關機時整個系統停擺
 

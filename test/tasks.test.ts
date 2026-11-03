@@ -169,6 +169,18 @@ describe("自訂名稱", () => {
   });
 });
 
+describe("平台標誌", () => {
+  test("/icons/<種類> 回傳標誌；gemini 視為 antigravity；不認得的回小機器人", async () => {
+    const get = async (k: string) => { const r = await fetch(`${hub.url}/icons/${k}`); return { status: r.status, type: r.headers.get("content-type"), body: await r.text() }; };
+    const claude = await get("claude");
+    expect(claude.status).toBe(200);
+    expect(claude.type).toContain("image/svg+xml");
+    expect((await get("gemini")).body).toBe((await get("antigravity")).body);
+    expect((await get("whatever")).body).toBe((await get("other")).body);
+    for (const k of ["hermes", "codex"]) expect((await get(k)).body).toContain("<svg");
+  });
+});
+
 describe("多個綁定位址", () => {
   test("HUB_HOST 用逗號列兩個位址，兩個都能連、同一個 port", async () => {
     const h2 = startHub({ db: openDb(":memory:"), host: "127.0.0.1,127.0.0.2", port: 7391, watchdogMs: 60000 });

@@ -5,14 +5,25 @@
       "_note": "Hermes（Windows 原生版，已在 A 機實測）：提示詞寫成檔案再傳路徑，避開命令列長度與引號問題",
       "name": "hermes_a",
       "token": "…",
-      "cmd": ["%LOCALAPPDATA%\\hermes\\bin\\hermes.exe", "chat", "-Q", "--query-file", "{prompt_file}"],
+      "cmd": [
+        "%LOCALAPPDATA%\\hermes\\bin\\hermes.exe",
+        "chat",
+        "-Q",
+        "--query-file",
+        "{prompt_file}"
+      ],
       "timeout_min": 30
     },
     {
       "_note": "Hermes（Linux／WSL）",
       "name": "hermes_c",
       "token": "…",
-      "cmd": ["hermes", "chat", "-Q", "-q"],
+      "cmd": [
+        "hermes",
+        "chat",
+        "-Q",
+        "-q"
+      ],
       "prompt_via": "arg"
     },
     {
@@ -28,23 +39,27 @@
       "_note": "Codex CLI（預留，未實測）：codex exec - 從 stdin 讀提示詞；-o 把最後的回答寫進檔案，剛好當結論。npm 裝的 codex 在 Windows 是 .cmd，office-node 會自動經 cmd.exe 執行",
       "name": "codex_a",
       "token": "…",
-      "cmd": ["codex", "exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "-o", "{answer_file}", "-"],
+      "cmd": [
+        "codex",
+        "exec",
+        "--skip-git-repo-check",
+        "--sandbox",
+        "workspace-write",
+        "-o",
+        "{answer_file}",
+        "-"
+      ],
       "prompt_via": "stdin",
       "timeout_min": 30
     },
     {
-      "_note": "Gemini CLI（預留，未實測；2026-06-18 起個人用戶已停用，企業版與付費 API key 仍可用）：-p 進入無介面模式，stdin 內容接在後面",
-      "name": "gemini_a",
-      "token": "…",
-      "cmd": ["gemini", "-p", "請完成下面（stdin）交代的任務", "--yolo"],
-      "prompt_via": "stdin",
-      "timeout_min": 30
-    },
-    {
-      "_note": "Antigravity CLI agy（預留，未實測，Gemini CLI 的後繼）：社群回報在 Windows 從程式呼叫 agy -p 可能卡住或沒有輸出，先在 Linux 試",
+      "_note": "Antigravity CLI agy（Google，預留，未實測）：社群回報在 Windows 從程式呼叫 agy -p 可能卡住或沒有輸出，先在 Linux 試",
       "name": "agy_a",
       "token": "…",
-      "cmd": ["agy", "-p"],
+      "cmd": [
+        "agy",
+        "-p"
+      ],
       "prompt_via": "arg",
       "timeout_min": 30
     }

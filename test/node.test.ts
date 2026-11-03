@@ -173,7 +173,7 @@ describe("一台多個執行者（假 Codex／假 Gemini，提示詞走 stdin）
 
   test("同一個 office-node 同時接兩個執行者；{answer_file} 佔位字讓 CLI 直接寫結論", async () => {
     const mk = (u: string, kind: string) => { const r = createAccount(hub.db, { username: u, firstName: u, isBot: true, kind, machine: "M" }); addMember(hub.db, OFFICE_GROUP_ID, r.account.id); tok[u] = r.token; return r.token; };
-    const tCodex = mk("codex_m", "codex"), tGem = mk("gemini_m", "gemini");
+    const tCodex = mk("codex_m", "codex"), tGem = mk("gemini_m", "antigravity");
     // 假 Codex：codex exec -o <檔> -（提示詞從 stdin），最後的回答寫進 -o 指定的檔案
     const fakeCodex = join(dir, "fake-codex.ts");
     writeFileSync(fakeCodex, `const a = process.argv.slice(2);

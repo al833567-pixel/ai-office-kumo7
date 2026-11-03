@@ -2,7 +2,7 @@
 // office：每台 agent 機器上的工具（Bun 單檔，不需安裝套件；Windows 與 Linux 都能用）。
 //
 //   office run                       常駐：執行者接線（收派工→執行→驗收→回報）、心跳、Claude session 偵測
-//                                    一台可同時接多個執行者（Hermes、Codex、Antigravity、Gemini 或任何命令列 AI）
+//                                    一台可同時接多個執行者（Hermes、Codex、Antigravity 或任何命令列 AI）
 //   office ask "<目標>" [選項]         櫃台：把目標交給團隊，等到完成後印出總結（需要 boss_token）
 //                                    選項：--lead auto|<claude 帳號>  --download <目錄>  --timeout <分鐘>
 //   office upload <檔案>...           上傳檔案到 Hub，印出 file_id（給 office_report 的 files 用）
@@ -42,7 +42,7 @@ interface Config {
   claude_token?: string;                       // 這台的主要 Claude（office-claude 啟動的那個）
   claude_profiles?: Record<string, string>;    // 同一台的其他 Claude：帳號名稱 → token（office-claude <帳號> 啟動）
   boss_token?: string;                         // 真人帳號，給 office ask 用
-  workers?: WorkerConfig[];                    // 執行者（Hermes、Codex、Antigravity、Gemini…）
+  workers?: WorkerConfig[];                    // 執行者（Hermes、Codex、Antigravity…）
   hermes_token?: string;                       // 舊版寫法：等同 workers 只有一個 Hermes
   hermes?: Omit<WorkerConfig, "token">;
   approvers?: number[];                        // 可以批准權限的真人帳號 id
@@ -121,7 +121,7 @@ class Hub {
 
 // ---------------- 執行外部指令（Windows／Linux） ----------------
 
-/** 找出 Windows 上指令的實際檔案（npm 裝的 codex、gemini 是 .cmd 包裝，不能直接 spawn） */
+/** 找出 Windows 上指令的實際檔案（npm 裝的 codex 等 CLI 是 .cmd 包裝，不能直接 spawn） */
 function whichWin(bin: string): string | null {
   if (/[\\/]/.test(bin)) return existsSync(bin) ? bin : null;
   const r = spawnSync("where", [bin], { encoding: "utf8" });

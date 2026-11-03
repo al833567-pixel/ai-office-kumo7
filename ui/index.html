@@ -390,11 +390,13 @@ obj(5,24,4,1,true,()=>{const X=5*T,Y=24*T;shadow(X+2,Y+9,62,3);box(X,Y-3,64,12,"
 obj(21,19,3,1,true,()=>{const X=21*T,Y=19*T;shadow(X+1,Y+14,46,3);box(X,Y-18,48,32,"#B88E64");for(let s=0;s<3;s++){R(X+2,Y-6+s*9,44,2,"#8E6440");for(let b=0;b<8;b++)R(X+3+b*5,Y-14+s*9,4,8,["#E9A28E","#9DBCE0","#F4C77A","#A9D68F","#D9C6E6","#FFF8EC","#7CC4B8","#E8A3A0"][(b+s*3)%8])}});
 function lamp(tx,ty){obj(tx,ty,1,1,true,()=>{const X=tx*T+8,Y=ty*T+14;shadow(X-5,Y,10,2);R(X-4,Y-2,8,2,"#8E6440");R(X-1,Y-24,2,22,"#8E6440");rbox(X-7,Y-32,14,10,"#FBE3A6");R(X-5,Y-31,10,2,"#FFF4D0")});lights.push({x:tx*T+8,y:ty*T-12,r:48,a:.28})}
 lamp(9,20);lamp(14,20);lamp(46,22);lamp(26,15);
-// cat bed (original sleepy cat)
-obj(11,25,2,1,true,()=>{const X=11*T+2,Y=25*T+2;shadow(X,Y+12,28,3);rbox(X,Y,28,12,"#D9C6E6");R(X+3,Y+2,22,6,"#EDE2F4");
-  R(X+6,Y-1,16,8,"#F4B26B");R(X+5,Y,18,6,"#F4B26B");R(X+7,Y-3,4,3,"#F4B26B");R(X+8,Y-4,1,1,"#F4B26B");R(X+10,Y-4,1,1,"#F4B26B");R(X+8,Y-1,2,1,OL);R(X+12,Y+1,6,1,"#E09A50");
-  const t=Math.sin(now*2)*2;R(X+20,Y+2+t,4,2,"#E09A50");
-  for(let i=0;i<2;i++){const ph=(now*.5+i/2)%1;txt("z",X+12+ph*6,Y-4-ph*8,5,`rgba(140,110,90,${1-ph})`,"left",900)}});
+// 小黑的狗窩（休息區左下角）：不擋路，小黑想睡覺時會走回來睡
+const DOG_BED={x:1,y:27};
+obj(DOG_BED.x,DOG_BED.y,0,0,false,()=>{const X=DOG_BED.x*T+1,Y=DOG_BED.y*T+3;
+  shadow(X+1,Y+13,28,3);R(X,Y+2,30,12,OL);R(X+1,Y+1,28,13,"#B9784F");R(X+2,Y,26,2,"#CF9068");   // 外圈
+  R(X+4,Y+3,22,8,"#F4E2C4");R(X+5,Y+4,20,6,"#FBEFD9");                                           // 墊子
+  R(X+11,Y+6,2,2,"#E3C79F");R(X+17,Y+6,2,2,"#E3C79F");R(X+12,Y+7,6,1,"#E3C79F");                // 骨頭圖案
+  txt("小黑",X+15,Y+20,5,"#9C7350","center",900)},DOG_BED.y*T+4);
 // meeting room
 obj(28,6,6,2,true,()=>{const X=28*T,Y=6*T;shadow(X+3,Y+28,92,3);box(X,Y-2,96,26,"#F7EEDC");R(X+1,Y+21,94,3,"#DCC9A8");rbox(X+18,Y+5,12,9,"#FFFFFF");rbox(X+60,Y+4,14,10,"#FFFFFF");R(X+46,Y+7,6,6,"#E9A28E");R(X+40,Y+3,3,3,"#A9D68F")});
 lights.push({x:31*T,y:7*T,r:60,a:.16});
@@ -457,7 +459,7 @@ const SPOTS={
 for(const id of Object.keys(desks)){const d=desks[id];SPOTS["seat-"+id]={tx:d.dx+2,ty:d.dy-1,x:d.dx+2.5,y:d.dy+0.25,face:"down",sit:1,desk:1}}
 SPOTS.books={tx:22,ty:20,x:22.5,y:20.8,face:"up"};      // 看書架
 SPOTS.printer={tx:22,ty:16,x:22.6,y:16.8,face:"up"};    // 影印機旁
-SPOTS.petcat={tx:13,ty:25,x:13.6,y:25.6,face:"left"};   // 摸摸貓
+SPOTS.petcat={tx:3,ty:27,x:3.6,y:27.7,face:"left"};    // 去狗窩看小黑
 SPOTS.window={tx:3,ty:3,x:3.6,y:3.7,face:"up"};          // 工作區窗邊發呆
 const IDLE=["coffee","arcade1","sofa1","pongL","tableT","water","bean1","arcade2","sofa2","tableL","bean2","tableR","sofa3","books","printer","petcat","window"];
 const claimed={};
@@ -500,20 +502,18 @@ const PAL={claude:{shirt:"#EE9C80",shirt2:"#D9806A",hair:"#7A5040",hair2:"#94645
   gemini:{shirt:"#9D8BD6",shirt2:"#8473C2",hair:"#3F4E8C",hair2:"#5A6BB0",star:"#F4C24A"},
   antigravity:{shirt:"#7FA6E0",shirt2:"#6A8FCB",hair:"#2F3E6E",hair2:"#4A5D96",star:"#F4C24A"},
   other:{shirt:"#E8C26A",shirt2:"#D2A94E",cap:"#C0703F",hair:"#5E4332"}};
-/* ---- 平台小圖示（7×7 像素，自己畫的辨識圖，不是官方商標） ---- */
-const ICONS={
-  claude:{rows:["...X...",".X.X.X.","..XXX..","XXXXXXX","..XXX..",".X.X.X.","...X..."],col:()=>"#D9774F"},                 // 橘色放射星
-  hermes:{rows:["X.....X","XX...XX","XXX.XXX",".XXXXX.","..XGX..","...X...","......."],col:(r,c,ch)=>ch==="G"?"#F4C24A":"#4E9C92"}, // 展翅
-  codex:{rows:["BBBBBBB","BGBBBBB","BBGBBBB","BGBBBBB","BBBBGGB","BBBBBBB","......."],col:(r,c,ch)=>ch==="G"?"#9CE6BF":"#2E3440"},   // 終端機 >_
-  gemini:{rows:["...X...","...X...","..XXX..","XXXXXXX","..XXX..","...X...","...X..."],col:(r)=>["#4F7DF0","#5D78EE","#6B73EB","#7E6FE6","#8F6BE2","#9C67DD","#A963D8"][r]}, // 四角閃光
-  antigravity:{rows:["...X...","..XXX..",".XXXXX.","...X...","..XXX..",".X.X.X.","......."],col:(r)=>r<3?"#4A7BD8":"#7FA6E0"},  // 往上飛的箭頭
-  other:{rows:["...X...",".XXXXX.",".X.X.X.",".XXXXX.",".X...X.",".XXXXX.","......."],col:()=>"#8E8597"},                    // 小機器人
-};
-function drawIcon(c,kind,x,y){const ic=ICONS[kind]||ICONS.other;ic.rows.forEach((row,r)=>[...row].forEach((ch,col)=>{if(ch!==".")R(x+col,y+r,1,1,ic.col(r,col,ch))}))}
-// 給 HTML 用的圖示（data URL），網頁上的看板、聊天、詳情面板共用
-const ICON_URL={};
-for(const k of Object.keys(ICONS)){const cv2=document.createElement("canvas");cv2.width=7;cv2.height=7;const prevC=C;C=cv2.getContext("2d");drawIcon(C,k,0,0);C=prevC;ICON_URL[k]=cv2.toDataURL()}
-const iconImg=(kind)=>`<img class="ico" src="${ICON_URL[kind]||ICON_URL.other}" alt="">`;
+/* ---- 平台標誌（各公司的標誌，來源見 ui/icons/NOTICE.md；可用 data/icons/<種類>.png 換成自己的圖） ---- */
+const LOGO_KINDS=["claude","hermes","codex","antigravity","other"];
+const logoKind=(k)=>k==="gemini"?"antigravity":(LOGO_KINDS.includes(k)?k:"other");
+const LOGOS={};
+for(const k of LOGO_KINDS){const im=new Image();im.src=`/icons/${k}`;LOGOS[k]=im}
+// 在畫布上畫標誌（大小以邏輯像素計，實際解析度是 3 倍，所以會清楚）
+function drawIcon(c,kind,x,y,size=7){
+  const im=LOGOS[logoKind(kind)];
+  if(!im||!im.complete||!im.naturalWidth){R(x+1,y+1,size-2,size-2,"#C9B8A4");return}
+  const prev=ctx.imageSmoothingEnabled;ctx.imageSmoothingEnabled=true;ctx.drawImage(im,x,y,size,size);ctx.imageSmoothingEnabled=prev;
+}
+const iconImg=(kind)=>`<img class="ico" src="/icons/${logoKind(kind)}" alt="">`;
 
 const spr=document.createElement("canvas");spr.width=32;spr.height=44;const sc=spr.getContext("2d");
 const sil=document.createElement("canvas");sil.width=32;sil.height=44;const sl=sil.getContext("2d");
@@ -569,7 +569,7 @@ function label(a,x,y){
   const st=a.state,col=ST_COLOR[st];ctx.font=`900 7px ${FONT}`;const nw=ctx.measureText(a.name).width;const top=y-35-(a.role==="owner"?3:0);
   const w=nw+25,lx=x-w/2;
   rr(lx,top-8,w,11,5,"rgba(255,248,236,.94)",OL);ctx.beginPath();ctx.arc(lx+5,top-2.5,2.2,0,7);ctx.fillStyle=col;ctx.fill();
-  C=ctx;drawIcon(ctx,a.kind,Math.round(lx+9),Math.round(top-6));txt(a.name,lx+18,top+.5,7,"#5E4332","left",900);
+  C=ctx;drawIcon(ctx,a.kind,lx+9,top-6.5,7.5);txt(a.name,lx+18,top+.5,7,"#5E4332","left",900);
   let b=null;
   if(st==="working")b=a.tool;else if(st==="stalled")b="摸魚中 "+Math.floor(a.stallSec/60)+":"+String(a.stallSec%60).padStart(2,"0");
   else if(st==="error")b="！"+(a.tool||"出錯了");else if(st==="waiting")b="等你批准";else if(st==="queued")b=a.tool||"排隊中";else if(st==="review")b=a.tool||"開會中";else if(st==="done")b="完成！";
@@ -674,7 +674,7 @@ function notify(title, body) {
 
 /* ---------- 帳號 → 畫面上的位置 ---------- */
 // 帳號依「機器 → 種類 → 建立順序」排好，依序坐進 8 個工位；超過 8 位的不顯示在辦公室（看板與聊天照常）
-const KIND_ORDER = ["claude", "codex", "antigravity", "gemini", "hermes"];
+const KIND_ORDER = ["claude", "codex", "antigravity", "hermes"];
 function mapAccounts() {
   const bots = accounts.filter((a) => a.is_bot).sort((x, y) =>
     String(x.machine ?? "~").localeCompare(String(y.machine ?? "~")) ||
@@ -856,7 +856,7 @@ function renderDrawer() {
   $("#renameForm").hidden = !u;
   if (document.activeElement !== $("#renameInput")) $("#renameInput").value = u ? a.name : "";
   $("#dMeta").innerHTML = `<span class="pill" style="--st:${ST_COLOR[a.state]}">${STATES[a.state] || a.state}</span>` + (a.role ? `<span class="role${a.role === "reviewer" ? " rev" : ""}">${a.role === "owner" ? "主管" : "審查"}</span>` : "") +
-    `<span>${a.machine ?? "?"} 機 · ${({ claude: "Claude Code", hermes: "Hermes", codex: "Codex CLI", gemini: "Gemini CLI", antigravity: "Antigravity CLI" })[a.kind] || a.kind || "—"}${a.kind === "claude" && a.sessionUp === false ? " · session 沒在跑" : ""}</span>`;
+    `<span>${a.machine ?? "?"} 機 · ${({ claude: "Claude Code（Anthropic）", hermes: "Hermes（Nous Research）", codex: "Codex CLI（OpenAI）", gemini: "Antigravity CLI（Google）", antigravity: "Antigravity CLI（Google）" })[a.kind] || a.kind || "—"}${a.kind === "claude" && a.sessionUp === false ? " · session 沒在跑" : ""}</span>`;
   $("#dNow").innerHTML = `<span>${s?.task ? `<b>#${s.task.task_id} ${esc(s.task.title)}</b>` : "沒有進行中的任務"}</span><span class="where">現在位置：${PLACE[a.state] || ""}</span>` +
     (s?.detail ? `<span class="mono">${esc(s.detail)}</span>` : "") + (s?.last_seen ? `<span class="hint">最後連線 ${fmtTime(s.last_seen)}${s.last_activity ? ` · 最後動作 ${fmtTime(s.last_activity)}` : ""}</span>` : "");
   const lines = (agentLog[selected] || []).slice(-120);
@@ -1006,7 +1006,7 @@ setInterval(() => {
 }, 1000);
 
 /* ---------- 辦公室的狗：小黑 ---------- */
-const pet = { x: 13.5, y: 26.5, path: [], face: "right", walkT: 0, mode: "sit", timer: 3, bubble: "", bubbleT: 0, speed: 3, goal: null };
+const pet = { x: 2, y: 27.55, path: [], face: "right", walkT: 0, mode: "sleep", timer: 6, bubble: "", bubbleT: 0, speed: 3, goal: null };
 const EMOTES = ["❤", "♪", "？", "！", "汪!", "🦴", "✨", "🐾", "😆", "🥺", "💤", "嗚~"];
 function petRandomTile() {
   for (let i = 0; i < 300; i++) {
@@ -1030,6 +1030,7 @@ function petTick(dt) {
     pet.walkT += dt;
     if (!pet.path.length) {
       pet.mode = "sit"; pet.timer = 3 + Math.random() * 6;
+      if (pet.goal === "__bed") { pet.mode = "sleep"; pet.timer = 12 + Math.random() * 12; pet.face = "left"; pet.x = DOG_BED.x + 1; pet.y = DOG_BED.y + .55; petEmote("💤", 2); pet.goal = null; }
       if (pet.goal) { const a = agents[pet.goal]; if (a && !a.hidden) { pet.face = a.x > pet.x ? "right" : "left"; petEmote(Math.random() < .6 ? "❤" : "汪!"); } pet.goal = null; }
     }
     return;
@@ -1045,7 +1046,7 @@ function petTick(dt) {
     if (walk[ty]?.[tx]) petGo(tx, ty, 4, id); else { const [x, y] = petRandomTile(); petGo(x, y, 2.6); }
   }
   else if (r < .9) { pet.mode = "sit"; pet.timer = 4 + Math.random() * 5; petEmote(); }
-  else { pet.mode = "sleep"; pet.timer = 10 + Math.random() * 10; petEmote("💤", 2); }
+  else petGo(DOG_BED.x + 1, DOG_BED.y, 2.6, "__bed"); // 想睡覺：走回狗窩
 }
 function drawPet() {
   const x = Math.round(pet.x * T), y = Math.round(pet.y * T), L = pet.face === "left";

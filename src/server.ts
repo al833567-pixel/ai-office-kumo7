@@ -133,6 +133,22 @@ export function startHub(cfg: HubConfig = {}) {
           return new Response(readFileSync(uiPath), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" } });
         }
 
+        // 平台圖示：data/icons/<種類>.png|svg（使用者自訂，git pull 不會蓋掉）優先，其次 ui/icons/<種類>.svg
+        const im = /^\/icons\/([a-z_]+)$/.exec(path);
+        if (im) {
+          const alias: Record<string, string> = { gemini: "antigravity" };
+          const kind = alias[im[1]] ?? im[1];
+          const known = ["claude", "hermes", "codex", "antigravity", "other"].includes(kind) ? kind : "other";
+          const userDir = dbPath === ":memory:" ? null : join(dbPath, "..", "icons");
+          const candidates = [
+            ...(userDir ? [[join(userDir, `${known}.png`), "image/png"], [join(userDir, `${known}.svg`), "image/svg+xml"]] : []),
+            [join(uiPath, "..", "icons", `${known}.svg`), "image/svg+xml"],
+          ] as [string, string][];
+          const hit = candidates.find(([f]) => existsSync(f));
+          if (!hit) return new Response("icon not found", { status: 404 });
+          return new Response(Bun.file(hit[0]), { headers: { "content-type": hit[1], "cache-control": "no-cache" } });
+        }
+
         if (path === "/ws") {
           const me = auth(url.searchParams.get("token") ?? "", "user");
           if (srv.upgrade(req, { data: { me } })) return undefined as unknown as Response;
