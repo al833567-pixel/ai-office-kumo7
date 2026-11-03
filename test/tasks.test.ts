@@ -138,6 +138,8 @@ describe("桌面版主管（沒有頻道）", () => {
     const g = await ok("claude_a", "createGoal", { title: "桌面版派工" });
     expect(g.lead).toBe("claude_a");
     const t = await ok("claude_a", "createTask", { goal_id: g.goal_id, assignee: "hermes_a", title: "做事", instructions: "x" });
+    // 模擬之前用過終端機模式：留下舊的 hook_state = idle
+    await fetch(`${hub.url}/hooks`, { method: "POST", headers: { authorization: `Bearer ${tok.claude_a}`, "content-type": "application/json" }, body: JSON.stringify({ hook_event_name: "Stop" }) });
     // 先清掉之前測試留下的訊息，只看這個目標
     await ok("claude_a", "waitEvents", { timeout: 0 });
     const waiting = ok("claude_a", "waitEvents", { goal_id: g.goal_id, timeout: 10 });

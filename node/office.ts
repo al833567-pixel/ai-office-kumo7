@@ -341,8 +341,15 @@ async function cmdDoctor(cfg: Config) {
   if (claudes.length) {
     const c = spawnSync("claude", ["--version"], { encoding: "utf8", shell: IS_WIN });
     ok(c.status === 0, `Claude Code 命令列版：${c.status === 0 ? c.stdout.trim() : "PATH 裡找不到 claude（只有桌面版時請執行 winget install Anthropic.ClaudeCode）"}`);
-    const envFile = join(homedir(), ".claude", "channels", "office", ".env");
-    ok(existsSync(envFile), `Claude channel 設定 ${envFile}`);
+    if (cfg.claude_mode === "desktop") {
+      console.log("ℹ️ claude_mode=desktop：Claude 用桌面版當主管（office-desktop MCP），office-node 在跑就算在線");
+      if (cfg.claude_process_pattern) console.log("ℹ️ claude_process_pattern 是終端機模式用的，桌面版模式會忽略它，可以從設定檔拿掉");
+      const r = spawnSync("claude", ["mcp", "get", "office-desktop"], { encoding: "utf8", shell: IS_WIN });
+      ok(r.status === 0, `Claude Code 設定裡有 office-desktop MCP${r.status === 0 ? "" : "（請執行 office setup-desktop）"}`);
+    } else {
+      const envFile = join(homedir(), ".claude", "channels", "office", ".env");
+      ok(existsSync(envFile), `Claude channel 設定 ${envFile}`);
+    }
     ok(existsSync(join(homedir(), ".claude", "skills", "office", "SKILL.md")), "/office skill 已安裝");
   }
 }
@@ -428,7 +435,7 @@ async function cmdSetupDesktop(cfg: Config, args: string[]) {
     不會再用終端機辦公室模式的話可以移除：claude plugin uninstall office@office-local
 
 接下來：
-  1. 設定檔加上 "claude_mode": "desktop"，再重新啟動 office-node（office run），UI 才會把 @${me.username} 顯示為在線。
+  1. 設定檔加上 "claude_mode": "desktop"，再重新啟動 office-node（office run），UI 才會把 @${me.username} 顯示為在線。${cfg.claude_mode !== "desktop" ? "（目前還沒加）" : ""}${cfg.claude_process_pattern ? "\n     設定檔裡的 claude_process_pattern 是終端機模式用的，桌面版模式會忽略，可以拿掉。" : ""}
   2. 重開 Claude Code 桌面版，開新的本機 session，輸入：/office <目標>
   3. 不要再同時開 office-claude（終端機辦公室 session）用同一個帳號，兩邊會搶派工訊息。`);
 }
@@ -610,13 +617,11 @@ async function cmdRun(cfg: Config) {
   };
   if (claudeHub) {
     // 桌面版模式：桌面版沒有頻道外掛和 hooks，這台的 office-node 在跑就算 Claude 在線；
-    // 有設 claude_process_pattern 時才改用程序偵測。
+    // claude_process_pattern 是終端機模式用的，桌面版模式忽略它（否則關掉 office-claude 就會被判離線）。
     const desktop = cfg.claude_mode === "desktop";
     const beat = async () => {
       if (desktop) {
-        const up = cfg.claude_process_pattern ? claudeUp() : true;
-        await claudeHub.call("heartbeat", up === false ? { claude_session: false, session_only: true } : { claude_session: true })
-          .catch((e) => log("Claude 心跳失敗：", (e as Error).message));
+        await claudeHub.call("heartbeat", { claude_session: true }).catch((e) => log("Claude 心跳失敗：", (e as Error).message));
         return;
       }
       const up = claudeUp();

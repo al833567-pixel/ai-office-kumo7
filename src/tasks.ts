@@ -522,8 +522,9 @@ export function agentStates(ctx: Ctx) {
     else if (pr?.hook_state === "waiting") state = "waiting";
     else if (doing) state = !lastAct || t - lastAct > opts.stallSec * 1000 ? "stalled" : "working";
     else if (pr?.hook_state === "working" && lastAct && t - lastAct < opts.stallSec * 1000) state = roles.length ? "review" : "working";
-    // 沒有 hooks 的 Claude（桌面版主管）：帶著進行中的目標、最近有呼叫 office 工具 → 開會／審查
-    else if (a.kind === "claude" && !pr?.hook_state && roles.length && lastAct && t - lastAct < opts.stallSec * 1000) state = "review";
+    // 帶著進行中的目標、最近有呼叫 office 工具（例如桌面版主管在 office_wait 等回報）→ 開會／審查。
+    // 桌面版沒有 hooks，但之前用終端機模式留下的 hook_state（通常是 idle）會一直留著，所以不能只認 hook_state 為空。
+    else if (a.kind === "claude" && roles.length && lastAct && t - lastAct < opts.stallSec * 1000) state = "review";
     else if (queued) state = "queued";
     else state = "idle";
     out[a.username] = {
