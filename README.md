@@ -30,7 +30,8 @@
 
 實際環境：兩台 Windows；家裡電腦（A 機）跑 Hub 和 Hermes（Windows 原生版）。
 
-- 兩台 Windows：[Bun](https://bun.sh)（`winget install Oven-sh.Bun`）、Git、Claude Code（用 claude.ai 帳號登入；頻道功能需要）
+- 兩台 Windows：[Bun](https://bun.sh)（`winget install Oven-sh.Bun`）、Git、Claude Code 命令列版（`winget install Anthropic.ClaudeCode`；用 claude.ai 帳號登入，頻道功能需要）
+  - 只裝了 Claude 桌面版的話，PATH 裡沒有 `claude` 指令，`office-claude.cmd` 會找不到；請另外用 winget 安裝命令列版。`office doctor` 會檢查這一項。
 - A 機：Hermes Agent（Windows 原生版，測過 v0.22.5）
 - 兩台之間：[Tailscale](https://tailscale.com)（只有一台時可以先不用）
 - Claude Code 頻道（channels）目前是研究預覽功能。個人 Pro/Max 可直接用；Team/Enterprise 要管理員先開啟。自製頻道每次啟動都會出現一次「開發者頻道」確認畫面。
@@ -183,7 +184,7 @@ claude mcp add --transport http --scope user office-hub http://127.0.0.1:7070/mc
 node\office-claude.cmd
 ```
 
-這等於設定 `OFFICE_SESSION=1` 後執行 `claude --dangerously-load-development-channels plugin:office@office-local`。第一次會出現開發者頻道的確認畫面，選「I am using this for local development」。
+這等於設定 `OFFICE_SESSION=1` 後執行 `claude --dangerously-load-development-channels plugin:office@office-local`，所以 PATH 裡要有命令列版的 `claude`（見「需求」）。第一次啟動會先要你選主題、登入 claude.ai。第一次會出現開發者頻道的確認畫面，選「I am using this for local development」。
 
 只有這個 session 會連 Hub；你平常開的 `claude` 不受影響。這個視窗要一直開著（頻道只在 session 開著時收得到訊息）。
 

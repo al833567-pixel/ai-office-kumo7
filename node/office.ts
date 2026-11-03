@@ -154,6 +154,10 @@ async function cmdDoctor(cfg: Config) {
       try { const r = await fetch(`${cfg.hermes?.api_url ?? "http://127.0.0.1:8642"}/health`); ok(r.ok, "Hermes API server"); } catch { ok(false, "Hermes API server 連不到"); }
     }
   }
+  if (cfg.claude_token) {
+    const c = spawnSync("claude", ["--version"], { encoding: "utf8", shell: platform() === "win32" });
+    ok(c.status === 0, `Claude Code 命令列版：${c.status === 0 ? c.stdout.trim() : "PATH 裡找不到 claude（只有桌面版時請執行 winget install Anthropic.ClaudeCode）"}`);
+  }
   const envFile = join(homedir(), ".claude", "channels", "office", ".env");
   ok(existsSync(envFile), `Claude channel 設定 ${envFile}`);
   ok(existsSync(join(homedir(), ".claude", "skills", "office", "SKILL.md")), "/office skill 已安裝");
