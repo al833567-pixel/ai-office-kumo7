@@ -235,6 +235,21 @@ const tail = (s: string, n: number) => (s.length > n ? "…" + s.slice(-n) : s).
 
 /** 整理 Hermes 的終端機輸出，讓回報文字乾淨：
  *  去掉 ANSI 跳脫碼（顏色、游標、OSC 標題）、\r 覆寫、只有框線的行、行首行尾的框線，以及 session_id 行。 */
+/** 從 Hermes 的原始輸出找工作階段編號（例如 "session_id: local-1a2b3c"），取最後一個 */
+function findSessionId(raw: string): string | null {
+  const plain = raw.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "");
+  const all = [...plain.matchAll(/session[_ ]id\s*[:=]\s*([A-Za-z0-9._:-]+)/gi)];
+  return all.length ? all[all.length - 1][1] : null;
+}
+
+/** 從整理過的輸出取「最後的結論」：最後一段（以空行分隔），太短就往前多帶一段 */
+function lastAnswer(clean: string, max = 1500): string {
+  const blocks = clean.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
+  let out = blocks.pop() ?? "";
+  while (out.length < 80 && blocks.length) out = `${blocks.pop()}\n\n${out}`;
+  return tail(out, max);
+}
+
 function cleanOutput(raw: string): string {
   const BOX = "─━│┃┄┅┆┇┈┉┊┋┌┍┎┏┐┑┒┓└┕┖┗┘┙┚┛├┝┞┟┠┡┢┣┤┥┦┧┨┩┪┫┬┭┮┯┰┱┲┳┴┵┶┷┸┹┺┻┼┽┾┿╀╁╂╃╄╅╆╇╈╉╊╋═║╒╓╔╕╖╗╘╙╚╛╜╝╞╟╠╡╢╣╤╥╦╧╨╩╪╫╬╭╮╯╰╴╵╶╷";
   const boxOnly = new RegExp(`^[\\s${BOX}]*$`);
@@ -269,9 +284,9 @@ async function askHermes(cfg: Config, prompt: string, o: { cwd: string; env: Rec
       const body = await res.json() as any;
       const text = body?.choices?.[0]?.message?.content ?? JSON.stringify(body).slice(0, 2000);
       o.onOutput?.(text);
-      return { code: res.ok ? 0 : 1, out: cleanOutput(String(text)), timedOut: false };
+      return { code: res.ok ? 0 : 1, out: cleanOutput(String(text)), timedOut: false, sessionId: body?.session_id ?? body?.id ?? null };
     } catch (e) {
-      return { code: 1, out: `Hermes API 錯誤：${(e as Error).message}`, timedOut: ctrl.signal.aborted };
+      return { code: 1, out: `Hermes API 錯誤：${(e as Error).message}`, timedOut: ctrl.signal.aborted, sessionId: null };
     } finally { clearTimeout(timer); }
   }
   const [bin, ...args] = (h.cmd ?? ["hermes", "chat", "-Q", "-q"]).map(expand);
@@ -290,7 +305,7 @@ async function askHermes(cfg: Config, prompt: string, o: { cwd: string; env: Rec
   const plain = { NO_COLOR: "1", FORCE_COLOR: "0", TERM: "dumb", COLUMNS: "200" };
   const r = await runProcess(bin, [...args, last], { cwd: o.cwd, env: { ...utf8, ...plain, ...(h.env ?? {}), ...o.env }, timeoutMs, onOutput: o.onOutput, signal: o.signal });
   if (promptFile) { try { unlinkSync(promptFile); } catch { /* 刪不掉就留著，不影響結果 */ } }
-  return { ...r, out: cleanOutput(r.out) };
+  return { ...r, out: cleanOutput(r.out), sessionId: findSessionId(r.out) };
 }
 
 async function cmdRun(cfg: Config) {
@@ -362,6 +377,9 @@ async function cmdRun(cfg: Config) {
     const dir = join(workRoot, `task-${d.task_id}`);
     const outDir = join(dir, "out");
     mkdirSync(outDir, { recursive: true });
+    // 給主管的結論寫在這個檔案；過程不送出（完整過程另存 hermes-*.log 給人查）
+    const answerFile = join(dir, "answer.md");
+    try { unlinkSync(answerFile); } catch { /* 沒有舊的 */ }
     const prompt = [
       `你是 ${me.first_name}，AI 辦公室裡負責執行的成員。只做下面任務要求的事，不要做額外的改動。`,
       "",
@@ -373,7 +391,8 @@ async function cmdRun(cfg: Config) {
       `要交付的檔案請放在：${outDir}`,
       ...(d.verify ? [`完成後系統會執行驗收指令：${d.verify}（結束碼 0 才算完成）`] : []),
       "",
-      "完成後用兩三句話說明你做了什麼、結果在哪裡。如果做不到，清楚說明卡在哪一步。",
+      `最後，把要交給主管的結論寫進檔案：${answerFile}`,
+      "結論只寫兩三句：做了什麼、結果是什麼、檔案在哪裡；不要寫過程。如果做不到，寫清楚卡在哪一步。",
     ].join("\n");
     const ctrl = new AbortController();
     running = { taskId: d.task_id, abort: ctrl };
@@ -383,10 +402,12 @@ async function cmdRun(cfg: Config) {
     let buf = "";
     let lastEdit = "";
     const typing = setInterval(() => hermesHub!.call("sendChatAction", { chat_id: OFFICE_GROUP, action: "typing" }).catch(() => {}), 4000);
+    const started = Date.now();
     const progress = setInterval(async () => {
+      // 只回報「還在跑、跑了多久、最後一行」，不把過程貼到群組
       const line = tail(cleanOutput(buf), 300).split("\n").filter(Boolean).pop() ?? "執行中";
       hermesHub!.call("progressTask", { task_id: d.task_id, note: line.slice(0, 200) }).catch(() => {});
-      const view = `▶️ #${d.task_id} 執行中…\n\n${tail(cleanOutput(buf), 1500) || "（尚無輸出）"}`;
+      const view = `▶️ #${d.task_id} 執行中…（${Math.round((Date.now() - started) / 60000)} 分鐘）`;
       if (progressMsg && view !== lastEdit) { lastEdit = view; hermesHub!.call("editMessageText", { chat_id: OFFICE_GROUP, message_id: progressMsg.message_id, text: view }).catch(() => {}); }
     }, 30_000);
     log(`▶️ 執行 #${d.task_id} ${d.title}`);
@@ -395,20 +416,36 @@ async function cmdRun(cfg: Config) {
     running = null;
     if (ctrl.signal.aborted) { log(`⛔ #${d.task_id} 已取消`); return; }
 
+    // 完整過程存檔給人查（不送給主管）
+    const logPath = join(dir, `hermes-${new Date().toISOString().replace(/[:.]/g, "-")}.log`);
+    try { writeFileSync(logPath, `# 任務 #${d.task_id} ${d.title}\n# session_id: ${r.sessionId ?? "（未取得）"}\n\n${r.out}\n`, "utf8"); } catch (e) { log(`寫入過程紀錄失敗：${(e as Error).message}`); }
+
     let status: "done" | "failed" = r.code === 0 && !r.timedOut ? "done" : "failed";
-    let result = r.timedOut ? `逾時（${cfg.hermes?.timeout_min ?? 30} 分鐘）\n${tail(r.out, 1500)}` : tail(r.out, 3000);
+    // 回報只放答案：優先用 Hermes 寫的 answer.md；沒寫就取輸出最後一段。失敗時附上錯誤尾段，主管才能判斷
+    let answer = "";
+    try { answer = cleanOutput(readFileSync(answerFile, "utf8")).slice(0, 3000); } catch { /* 沒寫 */ }
+    if (!answer) answer = lastAnswer(r.out);
+    let result = r.timedOut
+      ? `逾時（${cfg.hermes?.timeout_min ?? 30} 分鐘）\n${tail(r.out, 800)}`
+      : status === "failed" ? `${answer}\n\n錯誤（結束碼 ${r.code}）：\n${tail(r.out, 800)}` : answer;
     if (status === "done" && d.verify) {
       const [sh, args, verbatim] = shellArgs(d.verify);
       const v = await runProcess(sh, args, { cwd: dir, timeoutMs: (cfg.verify_timeout_sec ?? 120) * 1000, env: { OFFICE_OUT: outDir }, verbatim });
-      result += `\n\n驗收：${d.verify}\n結束碼 ${v.code}${v.out.trim() ? `\n${tail(cleanOutput(v.out), 1000)}` : ""}`;
-      if (v.code !== 0) status = "failed";
+      if (v.code === 0) result += `\n\n驗收通過（${d.verify}）`;
+      else {
+        status = "failed";
+        result += `\n\n驗收失敗：${d.verify}\n結束碼 ${v.code}${v.out.trim() ? `\n${tail(cleanOutput(v.out), 800)}` : ""}`;
+      }
     }
     const files: string[] = [];
     for (const name of readdirSync(outDir).slice(0, 10)) {
       const p = join(outDir, name);
       try { if (statSync(p).isFile() && statSync(p).size <= 50 * 1024 * 1024) files.push((await hermesHub!.upload(p)).file_id); } catch (e) { log(`上傳 ${name} 失敗：${(e as Error).message}`); }
     }
-    try { await hermesHub!.call("reportTask", { task_id: d.task_id, status, result, files }); log(`${status === "done" ? "✅" : "❌"} #${d.task_id} 回報 ${status}`); }
+    try {
+      await hermesHub!.call("reportTask", { task_id: d.task_id, status, result, files, session_ref: r.sessionId ?? undefined, log_ref: `${cfg.machine} 機：${logPath}` });
+      log(`${status === "done" ? "✅" : "❌"} #${d.task_id} 回報 ${status}${r.sessionId ? `（session ${r.sessionId}）` : ""}`);
+    }
     catch (e) { log(`#${d.task_id} 回報失敗：${(e as Error).message}`); }
     if (progressMsg) hermesHub!.call("editMessageText", { chat_id: OFFICE_GROUP, message_id: progressMsg.message_id, text: `${status === "done" ? "✅" : "❌"} #${d.task_id} ${status === "done" ? "完成" : "失敗"}：${d.title}` }).catch(() => {});
   }
@@ -419,7 +456,7 @@ async function cmdRun(cfg: Config) {
     const typing = setInterval(() => hermesHub!.call("sendChatAction", { chat_id: m.chat.id, action: "typing" }).catch(() => {}), 4000);
     const r = await askHermes(cfg, `${m.from.first_name} 對你說：${text}\n\n請簡短回答。`, { cwd: workRoot, env: { OFFICE_AS: "hermes" } });
     clearInterval(typing);
-    const answer = tail(r.out, 3500) || "（沒有輸出）";
+    const answer = lastAnswer(r.out, 3500) || "（沒有輸出）"; // 聊天也只回結論，不貼過程
     await hermesHub!.call("sendMessage", { chat_id: m.chat.id, text: answer, reply_parameters: { message_id: m.message_id } }).catch((e) => log("回覆失敗：", e.message));
   }
 

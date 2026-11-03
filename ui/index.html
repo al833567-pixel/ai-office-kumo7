@@ -155,6 +155,10 @@ a.tag{text-decoration:none}
 .dtasks{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:12px}
 .dtasks li{display:flex;gap:8px}
 .stream .state{color:#F4C77A}
+.trace{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted);background:var(--panel-2);border-radius:6px;padding:4px 6px}
+.trace span{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
+.trace code{font-family:var(--f-mono);color:var(--ink);overflow-wrap:anywhere}
+.trace .copy{font-size:11px;border:1px solid var(--soft);border-radius:6px;background:var(--panel);padding:0 6px;cursor:pointer}
 
 </style>
 </head>
@@ -669,11 +673,13 @@ function renderBoard() {
       if (t.attempts) meta += `<span class="mono">第 ${t.attempts + 1}/${t.max_attempts} 次</span>`;
       const files = (t.files || []).map((f) => `<a class="tag" href="/file/user${encodeURIComponent(TOKEN)}/${encodeURIComponent(f)}/" target="_blank" rel="noopener">📎 檔案</a>`).join("");
       const res = t.result && (t.status === "done" || t.status === "failed") ? `<div class="${t.status === "failed" ? "err" : "res"}">${esc(t.result.slice(-400))}</div>` : t.note ? `<div class="row">${esc(t.note)}</div>` : "";
+      // 執行者的工作階段與完整過程位置：只給你查，不會送給主管
+      const trace = (t.session_ref || t.log_ref) ? `<div class="trace">${t.session_ref ? `<span>工作階段 <code>${esc(t.session_ref)}</code> <button class="copy" type="button" data-copy="${esc(t.session_ref)}">複製</button></span>` : ""}${t.log_ref ? `<span>過程紀錄 <code>${esc(t.log_ref)}</code> <button class="copy" type="button" data-copy="${esc(t.log_ref.replace(/^[^：]*：/, ""))}">複製路徑</button></span>` : ""}</div>` : "";
       let acts = "";
       if (["todo", "doing", "blocked"].includes(t.status)) acts += `<button class="btn sm ghost" type="button" data-act="cancel" data-id="${t.task_id}">中止</button>`;
       if (t.status === "failed" || t.status === "done") acts += `<button class="btn sm ghost" type="button" data-act="retry" data-id="${t.task_id}">重跑</button>`;
       if (t.status !== "done") acts += `<select class="reassign" data-id="${t.task_id}" aria-label="改派 #${t.task_id}"><option value="">改派給…</option>${accounts.filter((a) => a.is_bot && a.username !== t.assignee).map((a) => `<option value="${a.username}">${esc(a.first_name)}</option>`).join("")}</select>`;
-      c.innerHTML = `<div class="row"><span class="id">#${t.task_id}</span><span class="tag st-${t.status}">${({ blocked: "等前置", todo: "待辦", doing: "進行中", done: "完成", failed: "失敗" })[t.status] || t.status}</span>${files}</div><div class="title">${esc(t.title)}</div><div class="row">${meta}</div>${res}<div class="actions">${acts}</div>`;
+      c.innerHTML = `<div class="row"><span class="id">#${t.task_id}</span><span class="tag st-${t.status}">${({ blocked: "等前置", todo: "待辦", doing: "進行中", done: "完成", failed: "失敗" })[t.status] || t.status}</span>${files}</div><div class="title">${esc(t.title)}</div><div class="row">${meta}</div>${res}${trace}<div class="actions">${acts}</div>`;
       col.appendChild(c);
     }
     b.appendChild(col);
@@ -682,6 +688,12 @@ function renderBoard() {
 const nameOf = (u) => accounts.find((a) => a.username === u)?.first_name || u || "—";
 
 document.addEventListener("click", async (e) => {
+  const cp = e.target.closest("[data-copy]");
+  if (cp) {
+    try { await navigator.clipboard.writeText(cp.dataset.copy); toast("已複製", "#5DB585"); }
+    catch { const r = document.createRange(); r.selectNodeContents(cp.previousElementSibling); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); toast("請按 Ctrl+C 複製", "#E0A43A"); }
+    return;
+  }
   const btn = e.target.closest("[data-act]");
   if (!btn) return;
   const id = Number(btn.dataset.id);

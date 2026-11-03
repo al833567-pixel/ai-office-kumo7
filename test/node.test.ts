@@ -63,6 +63,9 @@ console.log("\\x1b[2m╭──────────╮\\x1b[0m");
 console.log("\\x1b[2m│\\x1b[0m 已完成：寫了 \\x1b[1;32mreport.txt\\x1b[0m \\x1b[2m│\\x1b[0m");
 console.log("\\x1b[2m╰──────────╯\\x1b[0m");
 console.log("session_id: local-1a2b3c");
+// 照提示把結論寫進指定檔案（模擬 Hermes 聽話）；FAKE_NO_ANSWER=1 時不寫，測試退回「取最後一段」
+const m = prompt.match(/結論寫進檔案：(.+)$/m);
+if (m && !process.env.FAKE_NO_ANSWER) require("fs").writeFileSync(m[1].trim(), "報表已寫好，在 out/report.txt。");
 `);
   // 驗收用的小腳本：out/report.txt 存在且非空就成功（cmd.exe 與 sh 都能執行）
   checkScript = join(dir, "check-report.ts");
@@ -93,15 +96,21 @@ describe("office run（Hermes 接線）", () => {
     const t = await ok("claude_b", "createTask", { goal_id: g.goal_id, assignee: "hermes_b", title: "寫報表", instructions: "在輸出目錄寫 report.txt", verify: `"${BUN}" "${checkScript}"` });
     const done = await waitTask(t.task_id, ["done", "failed"]);
     expect(done.status).toBe("done");
-    expect(done.result).toContain("已完成");
-    expect(done.result).toContain("收到任務（檔案）"); // 走 --query-file
-    expect(done.result).toContain("已完成：寫了 report.txt");
+    // 回報只有答案與驗收結果，沒有過程
+    expect(done.result).toContain("報表已寫好，在 out/report.txt。");
+    expect(done.result).toContain("驗收通過");
+    expect(done.result).not.toContain("收到任務");    // 過程不送給主管
     expect(done.result).not.toContain("\x1b");      // 沒有 ANSI 色碼
     expect(done.result).not.toContain("session_id"); // 沒有 session_id 行
     expect(done.result).not.toMatch(/[│╭╰]/);         // 沒有框線
+    // 工作階段與完整過程記在任務上，給人日後查
+    expect(done.session_ref).toBe("local-1a2b3c");
+    expect(done.log_ref).toMatch(/^B 機：.*hermes-.*\.log$/);
+    const logFile = done.log_ref.replace(/^B 機：/, "");
+    expect(readFileSync(logFile, "utf8")).toContain("收到任務（檔案）"); // 走 --query-file，過程完整保存
+    expect(readFileSync(logFile, "utf8")).toContain("session_id: local-1a2b3c");
     expect(done.result).not.toContain("prompt-");      // 提示詞檔不在任務資料夾
     expect(existsSync(join(dir, "work", ".prompts")) ? readdirSync(join(dir, "work", ".prompts")).length : 0).toBe(0); // 用完已刪
-    expect(done.result).toContain("結束碼 0");
     expect(done.files.length).toBe(1);
     const info = await ok("claude_b", "getFile", { file_id: done.files[0] });
     expect(info.file_name).toBe("report.txt");
@@ -142,7 +151,7 @@ describe("提示詞當參數（arg 模式）", () => {
     addMember(hub.db, OFFICE_GROUP_ID, account.id);
     tok.hermes_c = token;
     const cfg2 = join(dir, "config-arg.json");
-    writeFileSync(cfg2, JSON.stringify({ hub: hub.url, machine: "C", hermes_token: token, hermes: { mode: "cli", cmd: [BUN, join(dir, "fake-hermes.ts")], cwd: join(dir, "work-c"), timeout_min: 1 } }));
+    writeFileSync(cfg2, JSON.stringify({ hub: hub.url, machine: "C", hermes_token: token, hermes: { mode: "cli", cmd: [BUN, join(dir, "fake-hermes.ts")], cwd: join(dir, "work-c"), timeout_min: 1, env: { FAKE_NO_ANSWER: "1" } } }));
     let log2 = "";
     argNode = spawn(BUN, [OFFICE, "run"], { env: { ...process.env, OFFICE_CONFIG: cfg2 } });
     argNode.stdout!.on("data", (b) => (log2 += b));
@@ -151,7 +160,9 @@ describe("提示詞當參數（arg 模式）", () => {
     const t = await ok("claude_b", "createTask", { goal_id: g.goal_id, assignee: "hermes_c", title: "arg 測試", instructions: "寫報表" });
     const r = await waitTask(t.task_id, ["done", "failed"]);
     expect(r.status).toBe("done");
-    expect(r.result).toContain("收到任務，開始處理");
+    // Hermes 沒寫 answer.md：退回取輸出最後一段（這個假 Hermes 的輸出只有一段）
+    expect(r.result).toContain("已完成：寫了 report.txt");
+    expect(r.session_ref).toBe("local-1a2b3c");
   }, 20000);
 });
 

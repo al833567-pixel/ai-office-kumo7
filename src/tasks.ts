@@ -14,6 +14,7 @@ export interface TaskRow {
   id: number; goal_id: number; title: string; instructions: string; assignee_id: number; created_by: number;
   status: string; depends_on: string; verify: string | null; attempts: number; max_attempts: number;
   lease_until: number | null; result: string | null; files: string | null; note: string | null;
+  session_ref: string | null; log_ref: string | null;
   created_at: number; updated_at: number;
 }
 
@@ -55,6 +56,7 @@ export function taskObj(db: Database, t: TaskRow) {
     assignee: acc(db, t.assignee_id)?.username, created_by: acc(db, t.created_by)?.username,
     status: t.status, depends_on: JSON.parse(t.depends_on), verify: t.verify, attempts: t.attempts, max_attempts: t.max_attempts,
     lease_until: t.lease_until, result: t.result, files: t.files ? JSON.parse(t.files) : [], note: t.note,
+    session_ref: t.session_ref ?? null, log_ref: t.log_ref ?? null,
     created_at: t.created_at, updated_at: t.updated_at,
   };
 }
@@ -69,9 +71,9 @@ export function goalObj(db: Database, g: GoalRow) {
 function setTask(ctx: Ctx, t: TaskRow, patch: Partial<TaskRow>, eventType = "task") {
   Object.assign(t, patch, { updated_at: now() });
   ctx.db.query(`UPDATE tasks SET status=$status, assignee_id=$assignee_id, attempts=$attempts, lease_until=$lease_until,
-                result=$result, files=$files, note=$note, updated_at=$updated_at WHERE id=$id`).run({
+                result=$result, files=$files, note=$note, session_ref=$session_ref, log_ref=$log_ref, updated_at=$updated_at WHERE id=$id`).run({
     status: t.status, assignee_id: t.assignee_id, attempts: t.attempts, lease_until: t.lease_until,
-    result: t.result, files: t.files, note: t.note, updated_at: t.updated_at, id: t.id,
+    result: t.result, files: t.files, note: t.note, session_ref: t.session_ref ?? null, log_ref: t.log_ref ?? null, updated_at: t.updated_at, id: t.id,
   });
   logEvent(ctx.db, eventType, ctx.me.id, null, taskObj(ctx.db, t));
 }
@@ -233,6 +235,11 @@ export const taskMethods: Record<string, (ctx: Ctx, p: Params) => unknown> = {
     const g = getGoal(db, t.goal_id)!;
     const lead = acc(db, g.lead_id)!;
     touchActivity(db, me.id, `回報 #${t.id} ${status}`);
+    // 工作階段編號與過程紀錄位置：只存在任務上給人查（UI 顯示），不放進給主管的回報訊息
+    const sessionRef = str(p.session_ref)?.trim().slice(0, 200);
+    const logRef = str(p.log_ref)?.trim().slice(0, 500);
+    if (sessionRef) t.session_ref = sessionRef;
+    if (logRef) t.log_ref = logRef;
 
     if (status === "done") {
       setTask(ctx, t, { status: "done", result, files: JSON.stringify(fileIds), lease_until: null });

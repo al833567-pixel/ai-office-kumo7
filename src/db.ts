@@ -133,6 +133,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   result        TEXT,
   files         TEXT,
   note          TEXT,
+  session_ref   TEXT,                          -- 執行者的工作階段編號（例如 Hermes 的 session_id），給人日後查詢
+  log_ref       TEXT,                          -- 完整執行過程的紀錄位置（執行者機器上的檔案路徑）
   created_at    INTEGER NOT NULL,
   updated_at    INTEGER NOT NULL
 );
@@ -203,6 +205,9 @@ export function openDb(path: string): Database {
   if (!cols.includes("machine")) db.exec("ALTER TABLE accounts ADD COLUMN machine TEXT");
   const mcols = (db.query("PRAGMA table_info(messages)").all() as { name: string }[]).map((c) => c.name);
   if (!mcols.includes("media")) db.exec("ALTER TABLE messages ADD COLUMN media TEXT");
+  const tcols = (db.query("PRAGMA table_info(tasks)").all() as { name: string }[]).map((c) => c.name);
+  if (!tcols.includes("session_ref")) db.exec("ALTER TABLE tasks ADD COLUMN session_ref TEXT");
+  if (!tcols.includes("log_ref")) db.exec("ALTER TABLE tasks ADD COLUMN log_ref TEXT");
   return db;
 }
 
