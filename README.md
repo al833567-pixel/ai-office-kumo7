@@ -1,5 +1,9 @@
 # AI 辦公室（Office Hub）
 
+![AI 辦公室畫面：主管在會議室等回報，Hermes 和另一個 Claude 在座位上工作，Codex 在任務看板前排隊，小黑在會議桌上](docs/images/office.png)
+
+<sub>示範畫面：主管「小克」在會議室等回報，赫米（Hermes）和小B（Claude）在座位上工作，Codex 排隊等前面的任務完成，Antigravity 在休息區，小黑跑到會議桌上。</sub>
+
 讓兩台 Windows 電腦上的 Claude Code 和 Hermes 組成一個團隊：你在任一台的 Claude Code 輸入 `/office 目標`，那台的 Claude 就當主管，拆任務派給其他人。進度、回報、檔案都經過家裡電腦上的 Hub，像素辦公室 UI 即時顯示每個人在做什麼。
 
 ```
