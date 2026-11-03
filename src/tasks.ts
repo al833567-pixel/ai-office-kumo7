@@ -360,20 +360,24 @@ export const taskMethods: Record<string, (ctx: Ctx, p: Params) => unknown> = {
     return Object.values(agentStates(ctx));
   },
 
-  /** office-node 定期呼叫：回報機器在線、Claude session 是否在跑 */
+  /** office-node 定期呼叫。
+   *  一般：更新自己的在線時間。
+   *  session_only=true（Windows 端用 claude_token）：只記錄 Claude session 是否在跑，不更新在線時間。 */
   heartbeat(ctx, p) {
     const t = Date.now();
+    const sessionOnly = p.session_only === true || p.session_only === "true";
     const sessionUp = p.claude_session === undefined ? null : (p.claude_session === true || p.claude_session === "true") ? 1 : 0;
-    const rawFor = p.for_accounts;
-    const targets = [ctx.me.id];
-    for (const u of (json<string[]>(rawFor, "for_accounts") ?? [])) { const a = getAccountBy(ctx.db, u); if (a && a.machine === ctx.me.machine) targets.push(a.id); }
-    for (const id of targets) {
+    if (!sessionOnly) {
       ctx.db.query(`INSERT INTO presence (account_id, last_seen, updated_at) VALUES (?, ?, ?)
-                    ON CONFLICT(account_id) DO UPDATE SET last_seen = excluded.last_seen, updated_at = excluded.updated_at`).run(id, t, t);
+                    ON CONFLICT(account_id) DO UPDATE SET last_seen = excluded.last_seen, updated_at = excluded.updated_at`).run(ctx.me.id, t, t);
     }
     if (sessionUp !== null) {
-      const claude = ctx.db.query("SELECT id FROM accounts WHERE kind = 'claude' AND machine = ?").get(ctx.me.machine) as { id: number } | null;
-      if (claude) ctx.db.query("UPDATE presence SET session_up = ? WHERE account_id = ?").run(sessionUp, claude.id);
+      const claude = ctx.me.kind === "claude" ? { id: ctx.me.id }
+        : ctx.db.query("SELECT id FROM accounts WHERE kind = 'claude' AND machine = ? AND disabled = 0").get(ctx.me.machine) as { id: number } | null;
+      if (claude) {
+        ctx.db.query(`INSERT INTO presence (account_id, session_up, updated_at) VALUES (?, ?, ?)
+                      ON CONFLICT(account_id) DO UPDATE SET session_up = excluded.session_up, updated_at = excluded.updated_at`).run(claude.id, sessionUp, t);
+      }
     }
     return true;
   },
@@ -446,6 +450,7 @@ export function agentStates(ctx: Ctx) {
     const lastAct = pr?.last_activity ?? null;
     let state: AgentState;
     if (!lastSeen || t - lastSeen > opts.offlineSec * 1000) state = "offline";
+    else if (a.kind === "claude" && pr?.session_up === 0) state = "offline"; // office-node 回報 session 沒在跑
     else if (pr?.hook_state === "error") state = "error";
     else if (pr?.hook_state === "waiting") state = "waiting";
     else if (doing) state = !lastAct || t - lastAct > opts.stallSec * 1000 ? "stalled" : "working";

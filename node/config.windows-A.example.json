@@ -1,0 +1,7 @@
+{
+  "hub": "http://127.0.0.1:7070",
+  "machine": "A",
+  "claude_token": "7000000001:貼上 claude_a 的 token",
+  "approvers": [1000000001],
+  "claude_process_pattern": "office@office-local"
+}

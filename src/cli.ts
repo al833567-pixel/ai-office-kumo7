@@ -3,6 +3,7 @@
 //   bun run src/cli.ts add <帳號> [--name 顯示名] [--kind claude|hermes|other] [--machine A] [--user]
 //   bun run src/cli.ts token <帳號>               重新產生 token（舊的立即失效）
 //   bun run src/cli.ts list                       列出帳號
+//   bun run src/cli.ts disable <帳號>             停用（例如沒有用到的 hermes_b）；enable <帳號> 恢復
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { openDb, ensureOfficeGroup, addMember, OFFICE_GROUP_ID, type Account } from "./db";
 import { createAccount, rotateToken } from "./auth";
@@ -14,8 +15,9 @@ const DEFAULTS = [
   { username: "boss", firstName: "老闆", isBot: false, kind: "human", machine: null },
   { username: "claude_a", firstName: "Claude-A", isBot: true, kind: "claude", machine: "A" },
   { username: "claude_b", firstName: "Claude-B", isBot: true, kind: "claude", machine: "B" },
+  // 目前只有一個 Hermes，跑在 A 機（家裡電腦）的 WSL。之後 B 機也有 Hermes 時：
+  //   bun run cli add hermes_b --name Hermes-B --kind hermes --machine B
   { username: "hermes_a", firstName: "Hermes-A", isBot: true, kind: "hermes", machine: "A" },
-  { username: "hermes_b", firstName: "Hermes-B", isBot: true, kind: "hermes", machine: "B" },
 ];
 
 function saveToken(username: string, token: string) {
@@ -66,6 +68,13 @@ switch (cmd) {
     for (const a of rows) console.log(`${String(a.id).padEnd(11)} ${a.is_bot ? "bot " : "user"} ${a.username.padEnd(10)} ${a.kind.padEnd(7)} ${(a.machine ?? "-").padEnd(3)} ${a.first_name}${a.disabled ? "（停用）" : ""}`);
     break;
   }
+  case "disable":
+  case "enable": {
+    const r = db.query("UPDATE accounts SET disabled = ? WHERE username = ?").run(cmd === "disable" ? 1 : 0, args[0] ?? "");
+    if (!r.changes) throw new Error(`找不到帳號 ${args[0]}`);
+    console.log(`${args[0]} 已${cmd === "disable" ? "停用（token 失效、不會出現在辦公室）" : "恢復"}`);
+    break;
+  }
   default:
-    console.log("指令：init | add <帳號> [--name 顯示名] [--kind claude|hermes|other] [--machine A] [--user] | token <帳號> | list");
+    console.log("指令：init | add <帳號> [--name 顯示名] [--kind claude|hermes|other] [--machine A] [--user] | token <帳號> | list | disable <帳號> | enable <帳號>");
 }

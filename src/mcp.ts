@@ -27,7 +27,7 @@ const TOOLS: ToolDef[] = [
   { name: "office_new_goal", description: "Start a team goal. You become its lead unless `lead` is given. Returns goal_id; all messages about it go to the goal's thread.", method: "createGoal",
     props: { title: { type: "string", description: "Short goal title" }, detail: { type: "string", description: "Full description from the user" }, lead: { type: "string", description: "Optional lead username; default: you" }, reviewer: { type: "string", description: "Optional reviewer username, or \"none\"; default: the other Claude" } }, required: ["title"] },
   { name: "office_assign", description: "Assign a task under a goal you lead. The assignee is notified automatically. Tasks with depends_on wait until those tasks are done.", method: "createTask",
-    props: { goal_id: { type: "integer" }, assignee: { type: "string", description: "Agent username, e.g. hermes_b" }, title: { type: "string" },
+    props: { goal_id: { type: "integer" }, assignee: { type: "string", description: "Agent username, e.g. hermes_a" }, title: { type: "string" },
       instructions: { type: "string", description: "Objective, inputs, exact steps, what not to do, expected output, where to put files" },
       verify: { type: "string", description: "Shell command whose exit code 0 proves the task is done (strongly recommended for Hermes)" },
       depends_on: { type: "array", items: { type: "integer" }, description: "task_ids that must be done first" },

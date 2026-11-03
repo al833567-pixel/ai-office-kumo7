@@ -19,7 +19,9 @@ description: 把一個目標交給 AI 辦公室團隊：你當主管，拆解成
 
 先在心裡列出完成目標需要的步驟，再為每一步呼叫 `office_assign`。原則：
 
-- **Hermes（hermes_a / hermes_b）是本地小模型**：只給「單一、具體、可驗證」的工作，例如一個指令、搬檔、設定 cron、查 log、整理成表格。**一定要給 `verify`**：一個結束碼 0 就代表完成的 shell 指令。派給檔案所在那台機器的 Hermes。
+- **Hermes（目前只有 hermes_a，跑在 A 機的 WSL／Linux）是本地小模型**：只給「單一、具體、可驗證」的工作，例如一個指令、搬檔、設定 cron、查 log、整理成表格。**一定要給 `verify`**：一個結束碼 0 就代表完成的 Linux shell 指令。
+  - 它在 WSL 裡：Windows 的檔案路徑要寫成 `/mnt/c/...`、`/mnt/d/...`（例如 `D:\data\a.csv` → `/mnt/d/data/a.csv`），指令用 Linux 的（bash、ls、grep）。
+  - B 機上的檔案它碰不到：B 機的工作派給 Claude-B，或先請 Claude-B 用 `office upload` 傳上來，再在任務說明裡附 file_id 讓 Hermes 用 `office download` 取得。
 - **Claude（你自己、另一個 Claude）**：寫程式、改多個檔案、需要判斷的工作。要自己做的部分也派給自己（`assignee` 填自己），再 `office_claim` 開始做，這樣狀態才會正確顯示。
 - 每張任務的 `instructions` 都要寫清楚：目標、輸入（路徑）、步驟、**不要做什麼**、預期產出、檔案放哪裡（Hermes 的產出放在 `$OFFICE_OUT` 目錄會自動上傳）。
 - 有先後順序就用 `depends_on`，前面的完成後系統會自動派出後面的。

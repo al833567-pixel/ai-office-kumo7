@@ -83,10 +83,10 @@ export function startHub(cfg: HubConfig = {}) {
     db.query(`INSERT INTO presence (account_id, last_seen, updated_at) VALUES (?, ?, ?)
               ON CONFLICT(account_id) DO UPDATE SET last_seen = excluded.last_seen, updated_at = excluded.updated_at`).run(id, t, t);
   };
-  const auth = (token: string, kind?: "bot" | "user"): Account => {
+  const auth = (token: string, kind?: "bot" | "user", touchPresence = true): Account => {
     const me = authenticate(db, token);
     if (!me || (kind && (kind === "bot") !== !!me.is_bot)) throw new ApiError(401, "Unauthorized");
-    touch(me.id);
+    if (touchPresence) touch(me.id);
     return me;
   };
   const ctxFor = (me: Account, signal?: AbortSignal): Ctx => ({ db, me, updates, opts, signal });
@@ -170,7 +170,8 @@ export function startHub(cfg: HubConfig = {}) {
         const m = /^\/(bot|user)([^/]+)\/([A-Za-z]+)$/.exec(path);
         if (!m) return reply({ ok: false, error_code: 404, description: "Not Found" }, 404);
         const [, kind, token, method] = m;
-        const me = auth(decodeURIComponent(token), kind as "bot" | "user");
+        // heartbeat 自己決定要不要更新在線時間（session_only 時不更新）
+        const me = auth(decodeURIComponent(token), kind as "bot" | "user", method !== "heartbeat");
         const params = await readParams(req, url);
         srv.timeout(req, 0); // 這個請求可能是長輪詢，取消個別逾時
         const result = await callMethod(ctxFor(me, req.signal), method, params);

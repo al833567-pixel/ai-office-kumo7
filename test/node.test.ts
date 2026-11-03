@@ -1,7 +1,7 @@
 // office-node：用假的 Hermes 指令跑完整個「收派工 → 執行 → 驗收 → 上傳檔案 → 回報」流程，以及 CLI。
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, writeFileSync, chmodSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startHub } from "../src/server";
@@ -15,6 +15,8 @@ let dir = "";
 let cfgPath = "";
 let node: ChildProcess;
 let nodeLog = "";
+let checkScript = "";
+const BUN = process.execPath; // 用目前執行測試的 bun，Windows 不必依賴 PATH 或 shebang
 
 async function ok(who: string, method: string, params: Record<string, unknown> = {}) {
   const kind = who === "boss" ? "user" : "bot";
@@ -38,23 +40,25 @@ beforeAll(async () => {
     tok[u] = token; addMember(hub.db, OFFICE_GROUP_ID, account.id);
   }
   dir = mkdtempSync(join(tmpdir(), "office-node-"));
-  // 假 Hermes：最後一個參數是提示詞；提示詞含 FAIL 就失敗，否則在 $OFFICE_OUT 寫一個檔案
-  const fake = join(dir, "fake-hermes");
-  writeFileSync(fake, `#!/usr/bin/env bash
-if [ "$1" = "--version" ]; then echo "fake-hermes 0.1"; exit 0; fi
-prompt="\${@: -1}"
-echo "收到任務，開始處理"
-if echo "$prompt" | grep -q "FAIL"; then echo "做不到" >&2; exit 3; fi
-if [ -n "$OFFICE_OUT" ]; then echo "報表內容" > "$OFFICE_OUT/report.txt"; fi
-echo "已完成：寫了 report.txt"
+  // 假 Hermes（Bun 腳本，Windows 也能跑）：最後一個參數是提示詞；提示詞含 FAIL 就失敗，否則在 $OFFICE_OUT 寫一個檔案
+  const fake = join(dir, "fake-hermes.ts");
+  writeFileSync(fake, `const args = process.argv.slice(2);
+if (args[0] === "--version") { console.log("fake-hermes 0.1"); process.exit(0); }
+const prompt = args.at(-1) ?? "";
+console.log("收到任務，開始處理");
+if (prompt.includes("FAIL")) { console.error("做不到"); process.exit(3); }
+if (process.env.OFFICE_OUT) require("fs").writeFileSync(require("path").join(process.env.OFFICE_OUT, "report.txt"), "報表內容\\n");
+console.log("已完成：寫了 report.txt");
 `);
-  chmodSync(fake, 0o755);
+  // 驗收用的小腳本：out/report.txt 存在且非空就成功（cmd.exe 與 sh 都能執行）
+  checkScript = join(dir, "check-report.ts");
+  writeFileSync(checkScript, `const fs = require("fs"); process.exit(fs.existsSync("out/report.txt") && fs.statSync("out/report.txt").size > 0 ? 0 : 1);`);
   cfgPath = join(dir, "config.json");
   writeFileSync(cfgPath, JSON.stringify({
     hub: hub.url, machine: "B", claude_token: tok.claude_b, hermes_token: tok.hermes_b, approvers: [1000000001],
-    hermes: { mode: "cli", cmd: [fake], cwd: join(dir, "work"), timeout_min: 1 },
+    hermes: { mode: "cli", cmd: [BUN, fake], cwd: join(dir, "work"), timeout_min: 1 },
   }));
-  node = spawn("bun", [OFFICE, "run"], { env: { ...process.env, OFFICE_CONFIG: cfgPath } });
+  node = spawn(BUN, [OFFICE, "run"], { env: { ...process.env, OFFICE_CONFIG: cfgPath } });
   node.stdout!.on("data", (b) => (nodeLog += b));
   node.stderr!.on("data", (b) => (nodeLog += b));
   for (let i = 0; i < 100 && !nodeLog.includes("office-node 已啟動"); i++) await Bun.sleep(100);
@@ -70,7 +74,7 @@ describe("office run（Hermes 接線）", () => {
 
   test("派工 → 假 Hermes 執行 → 驗收通過 → 上傳檔案 → 回報 done", async () => {
     const g = await ok("claude_b", "createGoal", { title: "產生報表" });
-    const t = await ok("claude_b", "createTask", { goal_id: g.goal_id, assignee: "hermes_b", title: "寫報表", instructions: "在輸出目錄寫 report.txt", verify: "test -s out/report.txt" });
+    const t = await ok("claude_b", "createTask", { goal_id: g.goal_id, assignee: "hermes_b", title: "寫報表", instructions: "在輸出目錄寫 report.txt", verify: `"${BUN}" "${checkScript}"` });
     const done = await waitTask(t.task_id, ["done", "failed"]);
     expect(done.status).toBe("done");
     expect(done.result).toContain("已完成");
@@ -111,7 +115,7 @@ describe("office run（Hermes 接線）", () => {
 describe("office CLI", () => {
   // 非同步執行：Hub 跑在測試程式裡，同步等待會卡住 Hub
   const run = async (...args: string[]) => {
-    const p = Bun.spawn(["bun", OFFICE, ...args], { env: { ...process.env, OFFICE_CONFIG: cfgPath }, stdout: "pipe", stderr: "pipe" });
+    const p = Bun.spawn([BUN, OFFICE, ...args], { env: { ...process.env, OFFICE_CONFIG: cfgPath }, stdout: "pipe", stderr: "pipe" });
     const [stdout, stderr] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
     return { status: await p.exited, stdout, stderr };
   };

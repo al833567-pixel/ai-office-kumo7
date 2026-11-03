@@ -185,6 +185,20 @@ describe("狀態", () => {
     expect((await fetch(`${hub.url}/hooks`, { method: "POST", body: "{}" })).status).toBe(401);
   });
 
+  test("Windows 端心跳（session_only）只回報 session，不會把 Claude 標成在線；session 沒在跑就顯示離線", async () => {
+    await Bun.sleep(3200); // 讓 claude_b 超過離線時間（測試設定 3 秒）
+    await ok("claude_b", "heartbeat", { claude_session: true, session_only: true });
+    let s = (await ok("boss", "getAgents")).find((a: any) => a.username === "claude_b");
+    expect(s.state).toBe("offline"); // 沒有外掛輪詢或 hooks，光靠心跳不算在線
+    expect(s.session_up).toBe(true);
+    await fetch(`${hub.url}/hooks`, { method: "POST", headers: { authorization: `Bearer ${tok.claude_b}`, "content-type": "application/json" }, body: JSON.stringify({ hook_event_name: "SessionStart" }) });
+    expect((await ok("boss", "getAgents")).find((a: any) => a.username === "claude_b").state).not.toBe("offline");
+    await ok("claude_b", "heartbeat", { claude_session: false, session_only: true });
+    s = (await ok("boss", "getAgents")).find((a: any) => a.username === "claude_b");
+    expect(s.state).toBe("offline");
+    expect(s.session_up).toBe(false);
+  });
+
   test("做任務但很久沒動靜 → 卡住", async () => {
     const g = await ok("claude_a", "createGoal", { title: "卡住測試" });
     const t = await ok("claude_a", "createTask", { goal_id: g.goal_id, assignee: "hermes_a", title: "x", instructions: "y" });

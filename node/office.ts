@@ -42,7 +42,7 @@ const CONFIG_PATH = process.env.OFFICE_CONFIG ?? join(homedir(), ".office", "con
 const OFFICE_GROUP = -1001000000001;
 
 function loadConfig(): Config {
-  if (!existsSync(CONFIG_PATH)) die(`找不到設定檔 ${CONFIG_PATH}。請參考 node/config.example.json 建立。`);
+  if (!existsSync(CONFIG_PATH)) die(`找不到設定檔 ${CONFIG_PATH}。請參考 node/config.windows-A.example.json、config.windows-B.example.json 或 config.wsl.example.json 建立。`);
   const cfg = JSON.parse(readFileSync(CONFIG_PATH, "utf8")) as Config;
   if (!cfg.hub) die("設定檔缺少 hub（例如 http://100.64.0.11:7070）");
   cfg.hub = cfg.hub.replace(/\/+$/, "");
@@ -206,9 +206,9 @@ async function cmdSetupClaude(cfg: Config) {
 // ---------------- 常駐：Hermes 接線 ----------------
 interface TaskData { type: "task"; task_id: number; goal_id: number; title: string; instructions: string; verify?: string | null; lead: string; attempt?: number }
 
-function runProcess(cmd: string, args: string[], o: { cwd: string; env?: Record<string, string>; timeoutMs: number; onOutput?: (chunk: string) => void; signal?: AbortSignal }) {
+function runProcess(cmd: string, args: string[], o: { cwd: string; env?: Record<string, string>; timeoutMs: number; onOutput?: (chunk: string) => void; signal?: AbortSignal; verbatim?: boolean }) {
   return new Promise<{ code: number | null; out: string; timedOut: boolean }>((resolveP) => {
-    const child = spawn(cmd, args, { cwd: o.cwd, env: { ...process.env, ...o.env }, stdio: ["ignore", "pipe", "pipe"], shell: false });
+    const child = spawn(cmd, args, { cwd: o.cwd, env: { ...process.env, ...o.env }, stdio: ["ignore", "pipe", "pipe"], shell: false, windowsVerbatimArguments: !!o.verbatim });
     let out = ""; let timedOut = false;
     const add = (b: Buffer) => { const s = b.toString(); out = (out + s).slice(-200_000); o.onOutput?.(s); };
     child.stdout.on("data", add); child.stderr.on("data", add);
@@ -219,7 +219,10 @@ function runProcess(cmd: string, args: string[], o: { cwd: string; env?: Record<
   });
 }
 
-const shellArgs = (command: string): [string, string[]] => platform() === "win32" ? ["cmd.exe", ["/d", "/s", "/c", command]] : ["/bin/sh", ["-c", command]];
+// Windows：cmd.exe 不認得反斜線跳脫的引號，所以整段命令原樣加一層引號交給 /s /c（與 cross-spawn 相同做法）
+const shellArgs = (command: string): [string, string[], boolean] => platform() === "win32"
+  ? ["cmd.exe", ["/d", "/s", "/c", `"${command}"`], true]
+  : ["/bin/sh", ["-c", command], false];
 const tail = (s: string, n: number) => (s.length > n ? "…" + s.slice(-n) : s).trim();
 
 async function askHermes(cfg: Config, prompt: string, o: { cwd: string; env: Record<string, string>; onOutput?: (s: string) => void; signal?: AbortSignal }) {
@@ -255,6 +258,7 @@ async function cmdRun(cfg: Config) {
   mkdirSync(workRoot, { recursive: true });
 
   // 檢查 Hermes 可用：不可用就不送它的心跳（UI 會顯示離線），避免派工給壞掉的 agent
+  // hermes.cmd 可以是 ["hermes","chat","-Q","-q"]，也可以是 ["bun","腳本.ts"] 這類包裝
   let hermesOk = false;
   let hermesMe: any = null;
   if (hermesHub) {
@@ -267,22 +271,29 @@ async function cmdRun(cfg: Config) {
     } else hermesOk = true;
   }
 
-  // 心跳：每 30 秒
+  // 心跳：每 30 秒。兩種角色分開送：
+  // - claude_token（Windows 端）：只回報「辦公室用的 Claude session 有沒有在跑」，不把 Claude 標成在線；
+  //   在線與否由頻道外掛的長輪詢和 hooks 決定，session 關掉時 UI 才會正確顯示離線。
+  // - hermes_token（WSL 端）：回報 Hermes 在線。
   const pattern = cfg.claude_process_pattern ?? "office@office-local";
-  const claudeUp = () => {
+  const claudeUp = (): boolean | null => {
     if (platform() === "win32") {
-      const r = spawnSync("wmic", ["process", "get", "commandline"], { encoding: "utf8" });
-      return r.status === 0 ? r.stdout.includes(pattern) : null;
+      // wmic 在新版 Windows 已移除，改用 PowerShell 的 Get-CimInstance；排除 powershell 自己（它的命令列也含關鍵字）
+      const q = `@(Get-CimInstance Win32_Process -Filter "CommandLine LIKE '%${pattern}%' AND Name <> 'powershell.exe' AND Name <> 'pwsh.exe'").Count`;
+      const r = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", q], { encoding: "utf8", timeout: 20_000 });
+      if (r.status !== 0) return null;
+      const n = Number(String(r.stdout).trim());
+      return Number.isFinite(n) ? n > 0 : null;
     }
     const r = spawnSync("pgrep", ["-f", pattern], { encoding: "utf8" });
     return r.error ? null : r.status === 0;
   };
   const beat = async () => {
-    const up = claudeUp();
-    try {
-      if (hermesHub && hermesOk) await hermesHub.call("heartbeat", { ...(up === null ? {} : { claude_session: up }) });
-      else if (claudeHub) await claudeHub.call("heartbeat", { ...(up === null ? {} : { claude_session: up }) });
-    } catch (e) { log("心跳失敗：", (e as Error).message); }
+    if (claudeHub) {
+      const up = claudeUp();
+      if (up !== null) await claudeHub.call("heartbeat", { claude_session: up, session_only: true }).catch((e) => log("Claude 心跳失敗：", (e as Error).message));
+    }
+    if (hermesHub && hermesOk) await hermesHub.call("heartbeat", {}).catch((e) => log("Hermes 心跳失敗：", (e as Error).message));
   };
   await beat();
   setInterval(beat, 30_000);
@@ -344,8 +355,8 @@ async function cmdRun(cfg: Config) {
     let status: "done" | "failed" = r.code === 0 && !r.timedOut ? "done" : "failed";
     let result = r.timedOut ? `逾時（${cfg.hermes?.timeout_min ?? 30} 分鐘）\n${tail(r.out, 1500)}` : tail(r.out, 3000);
     if (status === "done" && d.verify) {
-      const [sh, args] = shellArgs(d.verify);
-      const v = await runProcess(sh, args, { cwd: dir, timeoutMs: (cfg.verify_timeout_sec ?? 120) * 1000, env: { OFFICE_OUT: outDir } });
+      const [sh, args, verbatim] = shellArgs(d.verify);
+      const v = await runProcess(sh, args, { cwd: dir, timeoutMs: (cfg.verify_timeout_sec ?? 120) * 1000, env: { OFFICE_OUT: outDir }, verbatim });
       result += `\n\n驗收：${d.verify}\n結束碼 ${v.code}${v.out.trim() ? `\n${tail(v.out, 1000)}` : ""}`;
       if (v.code !== 0) status = "failed";
     }
