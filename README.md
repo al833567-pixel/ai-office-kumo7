@@ -69,13 +69,13 @@ scripts\windows\start-hub.cmd
 
 預設只聽 `127.0.0.1:7070`。瀏覽器開 `http://127.0.0.1:7070/`，貼上 `boss` 的 token 登入。
 
-要讓 B 機連進來時：登入 Tailscale，在專案根目錄建立 `hub.env.cmd`，寫一行 `set HUB_HOST=<A 機的 Tailscale IP>`（用 `tailscale ip -4` 查），重開 Hub。之後 A 機自己也改用這個 IP 連。
+要讓 B 機連進來時：登入 Tailscale，在專案根目錄建立 `hub.env.cmd`，寫一行 `set HUB_HOST=127.0.0.1,<A 機的 Tailscale IP>`（用 `tailscale ip -4` 查），重開 Hub。本機與 Tailscale 同時可連，A 機現有的設定都不用改；B 機用 Tailscale IP 連。
 
 ### Hub 環境變數
 
 | 變數 | 預設 | 說明 |
 |---|---|---|
-| `HUB_HOST` | `127.0.0.1` | 綁定位址。對外請用 Tailscale IP，不要用 `0.0.0.0` |
+| `HUB_HOST` | `127.0.0.1` | 綁定位址，可用逗號列多個（例如 `127.0.0.1,100.x.y.z`）。對外請用 Tailscale IP，不要用 `0.0.0.0` |
 | `HUB_PORT` | `7070` | 連接埠 |
 | `HUB_DB` | `data/office.db` | 資料庫；檔案存在旁邊的 `files/` |
 | `HUB_LEASE_MIN` | `15` | 任務租約分鐘數，超過沒回報進度就退回待辦 |
@@ -230,7 +230,7 @@ powershell -ExecutionPolicy Bypass -File scripts\windows\install-tasks.ps1 -Node
 /office 把 B 機的 nginx log 每天壓縮備份，並寫一個查詢 404 的小工具
 ```
 
-這台的 Claude 會當主管：開目標 → 看誰空閒 → 拆任務派工（Hermes 拿單一可驗證的工作，程式交給 Claude）→ 收回報、審查 → 下載檔案 → 在這個 session 跟你報告。另一個 Claude 自動當審查者。
+這台的 Claude 會當主管：開目標 → 看誰空閒 → 拆任務派工（Hermes 拿單一可驗證的工作，程式交給 Claude）→ 收回報、審查 → 下載檔案 → 在這個 session 跟你報告。另一個 Claude 在線時自動當審查者；不在線就不指定，由主管自己審。
 
 也可以在 UI 上方輸入目標，選主管（自動／Claude-A／Claude-B）。自動規則：目標提到哪台機器就給那台的 Claude → 誰空閒 → 手上工作最少。
 

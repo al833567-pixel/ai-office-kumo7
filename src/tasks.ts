@@ -148,7 +148,12 @@ export const taskMethods: Record<string, (ctx: Ctx, p: Params) => unknown> = {
     let reviewer: Account | null = null;
     if (p.reviewer === "none") reviewer = null;
     else if (p.reviewer) reviewer = requireAgent(db, p.reviewer, "reviewer");
-    else reviewer = (db.query("SELECT * FROM accounts WHERE kind = 'claude' AND disabled = 0 AND id != ? ORDER BY id").get(lead.id) as Account | null);
+    else {
+      // 預設審查者：另一位「在線」的 Claude；都不在線就不設（主管自己審），避免任務卡在不在線的人身上
+      const states = agentStates(ctx);
+      const others = db.query("SELECT * FROM accounts WHERE kind = 'claude' AND disabled = 0 AND id != ? ORDER BY id").all(lead.id) as Account[];
+      reviewer = others.find((c) => states[c.username] && states[c.username].state !== "offline") ?? null;
+    }
 
     const ts = now();
     const g = db.query(`INSERT INTO goals (title, detail, lead_id, reviewer_id, created_by, status, created_at, updated_at)
@@ -158,7 +163,7 @@ export const taskMethods: Record<string, (ctx: Ctx, p: Params) => unknown> = {
       ...(detail ? ["", detail] : []),
       "",
       me.id === lead.id ? `主管：${lead.first_name}（${why}）` : `${at(lead)} 你是這個目標的主管（${why}），請拆解並用 office_assign 派工。`,
-      `審查：${reviewer ? reviewer.first_name : "無"}`,
+      `審查：${reviewer ? reviewer.first_name : "無（另一位 Claude 不在線，由主管自行審查）"}`,
     ].join("\n");
     postMessage(ctx, OFFICE, { text, threadId: g.id, internal: true, data: { type: "goal", goal_id: g.id, lead: lead.username, reviewer: reviewer?.username ?? null, title } });
     logEvent(db, "goal", me.id, null, goalObj(db, g));
@@ -243,9 +248,11 @@ export const taskMethods: Record<string, (ctx: Ctx, p: Params) => unknown> = {
       if (attempts < t.max_attempts) {
         setTask(ctx, t, { status: "todo", attempts, result, lease_until: null, note: "失敗，自動重試" });
         dispatch(ctx, t, `🔁 重試任務（上次失敗：${result.slice(0, 200) || "未說明原因"}）`);
-      } else if (me.kind === "hermes" && g.reviewer_id && g.reviewer_id !== me.id) {
-        // 計畫：Hermes 連續失敗就自動改派給非主管的 Claude（審查者）
-        const helper = acc(db, g.reviewer_id)!;
+      } else if (me.kind === "hermes") {
+        // Hermes 用完重試次數：改派給審查者 Claude；審查者不在線（或沒有審查者）就改派給主管
+        const states = agentStates(ctx);
+        const reviewer = acc(db, g.reviewer_id);
+        const helper = reviewer && reviewer.id !== me.id && states[reviewer.username]?.state !== "offline" ? reviewer : lead;
         setTask(ctx, t, { status: "todo", attempts: 0, assignee_id: helper.id, result, lease_until: null, note: `由 ${me.username} 改派（失敗 ${attempts} 次）` });
         postMessage(ctx, OFFICE, { text: `${at(lead)} ⚠️ #${t.id} 在 ${me.first_name} 失敗 ${attempts} 次，已自動改派給 ${helper.first_name}。\n最後錯誤：${result.slice(0, 500)}`, threadId: g.id, internal: true,
           data: { type: "report", task_id: t.id, goal_id: g.id, status: "reassigned", to: helper.username } });
@@ -435,7 +442,7 @@ export function agentStates(ctx: Ctx) {
   const t = Date.now();
   const agents = db.query("SELECT * FROM accounts WHERE is_bot = 1 AND disabled = 0 ORDER BY id").all() as Account[];
   const out: Record<string, {
-    username: string; name: string; kind: string; machine: string | null; state: AgentState; detail: string | null;
+    username: string; name: string; kind: string; machine: string | null; state: AgentState; status: AgentState; detail: string | null;
     task: ReturnType<typeof taskObj> | null; queued: number; last_seen: number | null; last_activity: number | null; session_up: boolean | null; roles: string[];
   }> = {};
   for (const a of agents) {
@@ -458,7 +465,7 @@ export function agentStates(ctx: Ctx) {
     else if (queued) state = "queued";
     else state = "idle";
     out[a.username] = {
-      username: a.username, name: a.first_name, kind: a.kind, machine: a.machine, state, detail: pr?.detail ?? null,
+      username: a.username, name: a.first_name, kind: a.kind, machine: a.machine, state, status: state, detail: pr?.detail ?? null,
       task: doing ? taskObj(db, doing) : null, queued, last_seen: lastSeen, last_activity: lastAct,
       session_up: pr?.session_up === null || pr?.session_up === undefined ? null : !!pr.session_up, roles,
     };

@@ -112,9 +112,9 @@ export function startHub(cfg: HubConfig = {}) {
     for (const s of sockets) if (visible(s.me, ev.chat_key)) { try { s.ws.send(msg); } catch { /* 斷線的 socket 由 close 清掉 */ } }
   });
 
-  const server = Bun.serve<{ me: Account }, object>({
-    hostname: cfg.host ?? "127.0.0.1",
-    port: cfg.port ?? 7070,
+  // HUB_HOST 可以用逗號列多個位址（例如 127.0.0.1,100.x.y.z）：本機與 Tailscale 同時可連，A 機的設定不必改
+  const hosts = (cfg.host ?? "127.0.0.1").split(",").map((h) => h.trim()).filter(Boolean);
+  const serveOptions = {
     idleTimeout: Math.min(255, opts.maxPoll + 30), // 長輪詢期間不能被斷線
     websocket: {
       open(ws) { const entry = { me: ws.data.me, ws }; (ws.data as { entry?: unknown }).entry = entry; sockets.add(entry); ws.send(JSON.stringify(snapshot(ws.data.me))); },
@@ -184,14 +184,26 @@ export function startHub(cfg: HubConfig = {}) {
         return reply({ ok: false, error_code: err.code, description: err.message, ...(err.parameters ? { parameters: err.parameters } : {}) }, err.code);
       }
     },
-  });
+  };
+  type ServeArg = Parameters<typeof Bun.serve<{ me: Account }, object>>[0];
+  // 第一個位址用指定的 port（0 代表隨機），其餘位址綁在同一個 port
+  const first = Bun.serve<{ me: Account }, object>({ ...serveOptions, hostname: hosts[0], port: cfg.port ?? 7070 } as ServeArg);
+  const servers = [first];
+  try {
+    for (const hostname of hosts.slice(1)) servers.push(Bun.serve<{ me: Account }, object>({ ...serveOptions, hostname, port: first.port } as ServeArg));
+  } catch (e) {
+    for (const x of servers) x.stop(true);
+    throw e;
+  }
+  const server = servers[0];
 
   return {
     server,
     db,
     opts,
     url: `http://${server.hostname}:${server.port}`,
-    stop: () => { stopWatchdog(); unsubscribe(); server.stop(true); },
+    urls: servers.map((x) => `http://${x.hostname}:${x.port}`),
+    stop: () => { stopWatchdog(); unsubscribe(); for (const x of servers) x.stop(true); },
   };
 }
 
@@ -207,5 +219,5 @@ if (import.meta.main) {
     offlineSec: Number(process.env.HUB_OFFLINE_SEC ?? 120),
     log: process.env.HUB_LOG !== "0",
   });
-  console.log(`Office Hub 已啟動：${hub.url}（UI：${hub.url}/）`);
+  console.log(`Office Hub 已啟動：${hub.urls.join("、")}（UI 在同一個網址的 / ）`);
 }

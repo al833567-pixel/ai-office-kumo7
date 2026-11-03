@@ -21,7 +21,10 @@ description: 把一個目標交給 AI 辦公室團隊：你當主管，拆解成
 
 - **Hermes（目前只有 hermes_a，跑在 A 機的 Windows）是本地小模型**：只給「單一、具體、可驗證」的工作，例如一個指令、搬檔、排程、查 log、整理成表格。**一定要給 `verify`**：一個結束碼 0 就代表完成的指令。
   - 它在 Windows 上：路徑用 Windows 格式（`D:\data\a.csv`），指令用 PowerShell 或 cmd。
-  - `verify` 由 cmd.exe 執行，在任務的工作目錄裡跑；複雜的檢查用 PowerShell，例如 `powershell -NoProfile -Command "if ((Get-Item out\report.csv).Length -gt 0) { exit 0 } else { exit 1 }"`。
+  - `verify` 由 cmd.exe 執行，在任務的工作目錄裡跑；複雜的檢查用 PowerShell。
+  - **驗收必須檢查內容，不能只看檔案存在**（`dir`、`if exist` 等於沒檢查）。要驗證的是「結果對不對」：內容包含預期的字、行數或欄位對、數值在合理範圍、指令輸出符合預期。例如：
+    - `powershell -NoProfile -Command "$c = Get-Content out\report.csv; if ($c.Count -ge 2 -and $c[0] -match 'name,size') { exit 0 } else { exit 1 }"`
+    - `powershell -NoProfile -Command "if ((Get-Content D:\office-test\hello.txt -Raw) -match (Get-Date -Format 'yyyy-MM-dd')) { exit 0 } else { exit 1 }"`
   - 要交付的檔案請它放在任務說明寫的輸出目錄（環境變數 `OFFICE_OUT`），會自動上傳。
   - B 機上的檔案它碰不到：B 機的工作派給 Claude-B，或先請 Claude-B 用 `office upload` 傳上來，再在任務說明裡附 file_id 讓 Hermes 用 `office download` 取得。
 - **Claude（你自己、另一個 Claude）**：寫程式、改多個檔案、需要判斷的工作。要自己做的部分也派給自己（`assignee` 填自己），再 `office_claim` 開始做，這樣狀態才會正確顯示。
@@ -36,7 +39,7 @@ description: 把一個目標交給 AI 辦公室團隊：你當主管，拆解成
 - 看結果是否真的符合要求；不符合就 `office_review(task_id, "reject", 說明)` 退回。
 - 失敗且已改派或用完重試次數時，決定 `office_reassign`、`office_retry`，或自己接手。
 - 有檔案（file_id）時，用 `office download <file_id> <目錄>` 下載到這台電腦的工作目錄。
-- 另一個 Claude 是審查者，重要的程式改動可以請它審（`office_assign` 一張審查任務給它，或用 reply 在討論串請它看）。
+- 另一個 Claude 在線時會自動當審查者（不在線就沒有審查者，由你自己審）；重要的程式改動可以請它審（`office_assign` 一張審查任務給它，或用 reply 在討論串請它看）。
 
 等待期間不要空轉輪詢；回報會自動送進來。可以先做派給自己的任務。
 

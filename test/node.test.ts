@@ -33,6 +33,15 @@ async function waitTask(id: number, statuses: string[], ms = 15000) {
   throw new Error(`task ${id} 沒有變成 ${statuses}；office-node 輸出：\n${nodeLog}`);
 }
 
+async function waitReassigned(id: number, ms = 15000) {
+  for (let t = 0; t < ms; t += 100) {
+    const task = (await ok("claude_b", "getTasks", {})).find((x: any) => x.task_id === id);
+    if (task.assignee === "claude_b" && task.status === "todo") return task;
+    await Bun.sleep(100);
+  }
+  throw new Error(`task ${id} 沒有改派給主管；office-node 輸出：\n${nodeLog}`);
+}
+
 beforeAll(async () => {
   hub = startHub({ db: openDb(":memory:"), port: 0, maxPoll: 2 });
   for (const [u, isBot, kind, machine] of [["boss", false, "human", null], ["claude_b", true, "claude", "B"], ["hermes_b", true, "hermes", "B"]] as const) {
@@ -98,17 +107,18 @@ describe("office run（Hermes 接線）", () => {
     expect(info.file_name).toBe("report.txt");
   });
 
-  test("驗收失敗會回報 failed，主管收到通知並自動重試", async () => {
+  // 這兩個目標沒有在線的審查者：Hermes 用完重試次數後，任務改派給主管（claude_b）
+  test("驗收失敗：Hermes 回報 failed，用完次數後改派給主管", async () => {
     const g = await ok("claude_b", "createGoal", { title: "驗收失敗" });
     const t = await ok("claude_b", "createTask", { goal_id: g.goal_id, assignee: "hermes_b", title: "驗收會失敗", instructions: "隨便", verify: "exit 7", max_attempts: 1 });
-    const r = await waitTask(t.task_id, ["failed"]);
+    const r = await waitReassigned(t.task_id);
     expect(r.result).toContain("結束碼 7");
   });
 
-  test("Hermes 執行失敗（非 0 結束碼）會回報 failed", async () => {
+  test("Hermes 執行失敗（非 0 結束碼）：改派給主管並附上錯誤", async () => {
     const g = await ok("claude_b", "createGoal", { title: "執行失敗" });
     const t = await ok("claude_b", "createTask", { goal_id: g.goal_id, assignee: "hermes_b", title: "會失敗", instructions: "請 FAIL", max_attempts: 1 });
-    const r = await waitTask(t.task_id, ["failed"]);
+    const r = await waitReassigned(t.task_id);
     expect(r.result).toContain("做不到");
   });
 

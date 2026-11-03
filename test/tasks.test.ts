@@ -133,6 +133,36 @@ async function uploadText(who: string, name: string, text: string) {
   return r.result;
 }
 
+describe("審查者不在線", () => {
+  test("另一位 Claude 不在線時不指定審查者；Hermes 失敗用完次數改派給主管", async () => {
+    // claude_b 超過離線時間（測試設定 3 秒）且 session 回報沒在跑
+    await ok("claude_b", "heartbeat", { claude_session: false, session_only: true });
+    const g = await ok("claude_a", "createGoal", { title: "B 不在線" });
+    expect(g.reviewer).toBeNull();
+    const t = await ok("claude_a", "createTask", { goal_id: g.goal_id, assignee: "hermes_b", title: "會失敗", instructions: "x", max_attempts: 1 });
+    await ok("hermes_b", "claimTask", { task_id: t.task_id });
+    const r = await ok("hermes_b", "reportTask", { task_id: t.task_id, status: "failed", result: "壞了" });
+    expect(r).toMatchObject({ status: "todo", assignee: "claude_a" });
+    // 恢復 claude_b 的 session 狀態，避免影響後面的測試
+    await ok("claude_b", "heartbeat", { claude_session: true, session_only: true });
+  });
+
+  test("getAgents 同時有 state 與 status 欄位", async () => {
+    const a = (await ok("boss", "getAgents")).find((x: any) => x.username === "claude_a");
+    expect(a.status).toBe(a.state);
+  });
+});
+
+describe("多個綁定位址", () => {
+  test("HUB_HOST 用逗號列兩個位址，兩個都能連、同一個 port", async () => {
+    const h2 = startHub({ db: openDb(":memory:"), host: "127.0.0.1,127.0.0.2", port: 7391, watchdogMs: 60000 });
+    try {
+      expect(h2.urls).toEqual(["http://127.0.0.1:7391", "http://127.0.0.2:7391"]);
+      for (const u of h2.urls) expect((await fetch(`${u}/health`)).status).toBe(200);
+    } finally { h2.stop(); }
+  });
+});
+
 describe("檔案", () => {
   test("uploadFile → getFile → /file 下載；sendDocument 帶出 document 物件", async () => {
     const f = await uploadText("hermes_a", "報表.csv", "a,b\n1,2\n");
