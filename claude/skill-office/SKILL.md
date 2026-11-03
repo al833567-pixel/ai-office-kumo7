@@ -34,14 +34,18 @@ description: 把一個目標交給 AI 辦公室團隊：你當主管，拆解成
 
 ## 4. 等回報、審查
 
-回報會以 `<channel source="office" ... data_type="report">` 送進這個 session。收到時：
+先判斷你怎麼收到回報：
+
+- **有辦公室頻道**（這個 session 收過 `<channel source="office" ...>` 訊息，或有 office 的 `reply` 工具；終端機的 office-claude 就是）：回報會自動送進來，不要空轉輪詢，可以先做派給自己的任務。
+- **沒有頻道**（Claude Code 桌面版、一般 session）：沒有人能叫醒你，所以要在這一輪裡自己等。重複呼叫 `office_wait(goal_id)`（每次最多等 110 秒），處理它回傳的 `messages`，直到 `done` 為 `true` 或所有任務都完成。目標還沒結束前不要結束這一輪，除非使用者要你先停。派給自己的任務在兩次等待之間做。
+
+收到回報（`data.type` 是 `report`、`review`、`expired`，或文字裡有 ✅ ❌ ⚠️）時：
 
 - 看結果是否真的符合要求；不符合就 `office_review(task_id, "reject", 說明)` 退回。
 - 失敗且已改派或用完重試次數時，決定 `office_reassign`、`office_retry`，或自己接手。
 - 有檔案（file_id）時，用 `office download <file_id> <目錄>` 下載到這台電腦的工作目錄。
-- 另一個 Claude 在線時會自動當審查者（不在線就沒有審查者，由你自己審）；重要的程式改動可以請它審（`office_assign` 一張審查任務給它，或用 reply 在討論串請它看）。
-
-等待期間不要空轉輪詢；回報會自動送進來。可以先做派給自己的任務。
+- 另一個 Claude 在線時會自動當審查者（不在線就沒有審查者，由你自己審）；重要的程式改動可以請它審（`office_assign` 一張審查任務給它）。
+- 用 `office_tasks(goal_id)` 隨時確認哪些任務還沒完成。
 
 ## 5. 收尾
 

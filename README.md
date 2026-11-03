@@ -209,6 +209,21 @@ scripts\windows\start-office-node.cmd
 
 它每 30 秒用 PowerShell `Get-CimInstance` 檢查辦公室用的 Claude Code 有沒有在跑；session 關掉時 UI 會把那個 Claude 顯示為離線。A 機的這個程式同時也是 Hermes 接線（第二節的 `run` 就是它），不用另外再開一個。
 
+### 改用 Claude Code 桌面版當主管（不用開終端機）
+
+只想在桌面版打字派工的話，第 2、3 步改成下面這樣（兩種擇一，同一個帳號不要兩邊同時開）：
+
+```bash
+office setup-desktop
+```
+
+它會把 Hub 的 MCP（`office-desktop`，用 `claude_token` 的帳號）加進 Claude Code 設定，並安裝 `/office` skill。桌面版和命令列讀同一份設定，所以 PATH 裡要有命令列版 `claude`；沒有的話它會印出手動指令。接著：
+
+1. 設定檔 `~/.office/config.json` 加上 `"claude_mode": "desktop"`，重開 office-node。桌面版沒有 hooks，改由 office-node 在跑就把這個 Claude 顯示為在線。
+2. 重開桌面版，開一個本機 session，輸入 `/office <目標>`。
+
+桌面版會自己開目標、派工，然後在同一輪裡用 `office_wait` 等回報、審查、結案，最後在對話裡交出成果。差別是：桌面版不能被「叫醒」，所以**等待期間那一輪會一直跑**，你要在它等的時候插話，按停止再打字即可（之後說「繼續等 #目標」就會接著等）。別人（另一台 Claude、失敗改派）丟給它的工作，也要等它下一次 `office_wait` 才會看到。
+
 ---
 
 ## 四、開機自動啟動

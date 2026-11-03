@@ -13,6 +13,7 @@
 //   office whoami                    顯示目前使用的帳號
 //   office setup-claude [--as <帳號>] 寫入 Claude 端設定（channel .env、access.json、/office skill）並印出要執行的指令
 //                                    同一台第二個以上的 Claude 用 --as（帳號 token 放在 claude_profiles）
+//   office setup-desktop [--as <帳號>] 讓 Claude Code 桌面版直接當主管：加 office MCP、裝 /office skill
 //   office doctor                    檢查設定、連線與每個執行者的指令
 //
 // 設定檔：~/.office/config.json（或環境變數 OFFICE_CONFIG 指定路徑）。
@@ -48,6 +49,7 @@ interface Config {
   approvers?: number[];                        // 可以批准權限的真人帳號 id
   verify_timeout_sec?: number;
   claude_process_pattern?: string;
+  claude_mode?: "channel" | "desktop";         // desktop：用 Claude Code 桌面版當主管（office setup-desktop）
 }
 
 const CONFIG_PATH = process.env.OFFICE_CONFIG ?? join(homedir(), ".office", "config.json");
@@ -396,6 +398,34 @@ office_* 工具由 office 外掛直接提供，不需要再 claude mcp add。
   ${launcher}`);
 }
 
+async function cmdSetupDesktop(cfg: Config, args: string[]) {
+  const i = args.indexOf("--as");
+  const profile = i >= 0 ? args[i + 1] : null;
+  const token = profile ? (cfg.claude_profiles?.[profile] ?? die(`設定檔的 claude_profiles 裡沒有 ${profile}`)) : tokenFor(cfg, "claude");
+  const hub = new Hub(cfg.hub, token);
+  const me = await hub.call("getMe");
+  const kind = (await hub.call<any[]>("getAgents")).find((a) => a.username === me.username)?.kind;
+  if (kind && kind !== "claude") die(`@${me.username} 不是 claude 帳號，桌面版當主管要用 claude 帳號`);
+  const name = "office-desktop";
+  const url = `${cfg.hub.replace(/\/+$/, "")}/mcp`;
+  const claude = (a: string[]) => spawnSync("claude", a, { encoding: "utf8", shell: IS_WIN });
+  claude(["mcp", "remove", name, "-s", "user"]);
+  const r = claude(["mcp", "add", "--transport", "http", "-s", "user", name, url, "--header", `Authorization: Bearer ${token}`]);
+  const skillSrc = join(import.meta.dir, "..", "claude", "skill-office", "SKILL.md");
+  const skillDir = join(homedir(), ".claude", "skills", "office");
+  mkdirSync(skillDir, { recursive: true });
+  copyFileSync(skillSrc, join(skillDir, "SKILL.md"));
+  const manual = `claude mcp add --transport http -s user ${name} ${url} --header "Authorization: Bearer <token>"`;
+  console.log(`桌面版主管設定（@${me.username}）：
+  MCP：${r.status === 0 ? `已加入 ${name} → ${url}` : `自動加入失敗（${(r.stderr || r.error?.message || "").trim()}），請手動執行：\n    ${manual}`}
+  /office skill：${join(skillDir, "SKILL.md")}
+
+接下來：
+  1. 設定檔加上 "claude_mode": "desktop"，再重新啟動 office-node（office run），UI 才會把 @${me.username} 顯示為在線。
+  2. 重開 Claude Code 桌面版，開新的本機 session，輸入：/office <目標>
+  3. 不要再同時開 office-claude（終端機辦公室 session）用同一個帳號，兩邊會搶派工訊息。`);
+}
+
 // ---------------- 常駐：執行者接線 ----------------
 interface TaskData { type: "task"; task_id: number; goal_id: number; title: string; instructions: string; verify?: string | null; lead: string; attempt?: number }
 
@@ -571,7 +601,16 @@ async function cmdRun(cfg: Config) {
     return r.error ? null : r.status === 0;
   };
   if (claudeHub) {
+    // 桌面版模式：桌面版沒有頻道外掛和 hooks，這台的 office-node 在跑就算 Claude 在線；
+    // 有設 claude_process_pattern 時才改用程序偵測。
+    const desktop = cfg.claude_mode === "desktop";
     const beat = async () => {
+      if (desktop) {
+        const up = cfg.claude_process_pattern ? claudeUp() : true;
+        await claudeHub.call("heartbeat", up === false ? { claude_session: false, session_only: true } : { claude_session: true })
+          .catch((e) => log("Claude 心跳失敗：", (e as Error).message));
+        return;
+      }
       const up = claudeUp();
       if (up !== null) await claudeHub.call("heartbeat", { claude_session: up, session_only: true }).catch((e) => log("Claude 心跳失敗：", (e as Error).message));
     };
@@ -598,6 +637,7 @@ switch (cmd) {
   case "whoami": await cmdWhoami(cfg); break;
   case "doctor": await cmdDoctor(cfg); break;
   case "setup-claude": await cmdSetupClaude(cfg, args); break;
+  case "setup-desktop": await cmdSetupDesktop(cfg, args); break;
   default:
-    console.log(readFileSync(import.meta.path, "utf8").split("\n").slice(1, 19).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
+    console.log(readFileSync(import.meta.path, "utf8").split("\n").slice(1, 20).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
 }

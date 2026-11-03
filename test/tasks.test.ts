@@ -133,6 +133,31 @@ async function uploadText(who: string, name: string, text: string) {
   return r.result;
 }
 
+describe("桌面版主管（沒有頻道）", () => {
+  test("Claude 開目標派工，用 waitEvents 等到回報，結案後 done 為 true", async () => {
+    const g = await ok("claude_a", "createGoal", { title: "桌面版派工" });
+    expect(g.lead).toBe("claude_a");
+    const t = await ok("claude_a", "createTask", { goal_id: g.goal_id, assignee: "hermes_a", title: "做事", instructions: "x" });
+    // 先清掉之前測試留下的訊息，只看這個目標
+    await ok("claude_a", "waitEvents", { timeout: 0 });
+    const waiting = ok("claude_a", "waitEvents", { goal_id: g.goal_id, timeout: 10 });
+    await ok("hermes_a", "claimTask", { task_id: t.task_id });
+    await ok("hermes_a", "reportTask", { task_id: t.task_id, status: "done", result: "好了" });
+    const w = await waiting;
+    expect(w.done).toBe(false);
+    expect(w.messages.some((m: any) => m.data?.type === "report" && m.data?.task_id === t.task_id)).toBe(true);
+    await ok("claude_a", "completeGoal", { goal_id: g.goal_id, summary: "完成" });
+    const end = await ok("claude_a", "waitEvents", { goal_id: g.goal_id, timeout: 10 });
+    expect(end).toMatchObject({ done: true, goal: { summary: "完成" } });
+  });
+
+  test("桌面版模式的心跳：一般心跳加 claude_session=true，會讓 Claude 顯示在線", async () => {
+    await ok("claude_b", "heartbeat", { claude_session: true });
+    const agents = await ok("boss", "getAgents");
+    expect(agents.find((a: any) => a.username === "claude_b").state).not.toBe("offline");
+  });
+});
+
 describe("審查者不在線", () => {
   test("另一位 Claude 不在線時不指定審查者；Hermes 失敗用完次數改派給主管", async () => {
     // claude_b 超過離線時間（測試設定 3 秒）且 session 回報沒在跑

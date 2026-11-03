@@ -14,5 +14,6 @@
     }
   ],
   "verify_timeout_sec": 120,
+  "claude_mode": "channel",
   "claude_process_pattern": "office@office-local"
 }
