@@ -252,7 +252,7 @@ powershell -ExecutionPolicy Bypass -File scripts\windows\install-tasks.ps1 -Node
 
 登入時會各開一個命令列視窗執行（標題「AI Office Hub」「AI Office Node」），**關掉視窗就停止**，不會自動重開；日誌在 `data\logs\`。重複執行沒關係：工作已存在就更新設定，並先結束這個專案舊的 bun 再啟動。
 
-選用參數：`-Watchdog`（每 5 分鐘檢查，沒在跑就重開；異常結束每分鐘重試）、`-Firewall`（系統管理員：只允許 Tailscale 網段 100.64.0.0/10 連 7070，已存在就略過）。移除用 `-Uninstall`。之前用系統管理員註冊過的，重新註冊也要用系統管理員。
+選用參數：`-Watchdog`（每 5 分鐘檢查，沒在跑就重開；異常結束每分鐘重試）、`-Firewall`（系統管理員：只允許 Tailscale 網段 100.64.0.0/10 連 7070，已存在就略過）。移除用 `-Uninstall`。之前用系統管理員註冊過的，重新註冊也要用系統管理員。（Hermes 改在 WSL 跑的話才需要 `-WslHermes`。）
 
 辦公室用的 Claude Code（`office-claude.cmd`）要在終端機互動執行，不適合放進排程。
 
