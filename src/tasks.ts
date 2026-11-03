@@ -187,7 +187,7 @@ export const taskMethods: Record<string, (ctx: Ctx, p: Params) => unknown> = {
       if (!dt || dt.goal_id !== g.id) throw new ApiError(400, `Bad Request: depends_on #${d} is not a task of goal #${g.id}`);
     }
     const ready = deps.every((d) => getTask(db, d)!.status === "done");
-    const maxAttempts = Math.min(Math.max(int(p.max_attempts, "max_attempts") ?? (assignee.kind === "hermes" ? 2 : 3), 1), 5);
+    const maxAttempts = Math.min(Math.max(int(p.max_attempts, "max_attempts") ?? (assignee.kind === "claude" ? 3 : 2), 1), 5);
     const ts = now();
     const t = db.query(`INSERT INTO tasks (goal_id, title, instructions, assignee_id, created_by, status, depends_on, verify, max_attempts, created_at, updated_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`)
@@ -255,8 +255,8 @@ export const taskMethods: Record<string, (ctx: Ctx, p: Params) => unknown> = {
       if (attempts < t.max_attempts) {
         setTask(ctx, t, { status: "todo", attempts, result, lease_until: null, note: "失敗，自動重試" });
         dispatch(ctx, t, `🔁 重試任務（上次失敗：${result.slice(0, 200) || "未說明原因"}）`);
-      } else if (me.kind === "hermes") {
-        // Hermes 用完重試次數：改派給審查者 Claude；審查者不在線（或沒有審查者）就改派給主管
+      } else if (me.kind !== "claude") {
+        // 執行者（Hermes、Codex、Antigravity…）用完重試次數：改派給審查者 Claude；審查者不在線（或沒有審查者）就改派給主管
         const states = agentStates(ctx);
         const reviewer = acc(db, g.reviewer_id);
         const helper = reviewer && reviewer.id !== me.id && states[reviewer.username]?.state !== "offline" ? reviewer : lead;
@@ -368,6 +368,57 @@ export const taskMethods: Record<string, (ctx: Ctx, p: Params) => unknown> = {
     if (status) { where.push("status = ?"); args.push(status); }
     const rows = db.query(`SELECT * FROM tasks ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY id DESC LIMIT 200`).all(...args) as TaskRow[];
     return rows.map((t) => taskObj(db, t));
+  },
+
+  /** 給「櫃台」用的等待：最多等 timeout 秒，回傳期間收到、跟我有關的新訊息；
+   *  帶 goal_id 時，目標一結束就連同總結一起回傳。讀取位置存在 Hub（wait_cursor），呼叫端不用管 offset。
+   *  注意：同一個帳號不要同時用 getUpdates 與 office_wait，兩者共用同一條佇列。 */
+  async waitEvents(ctx, p) {
+    const { db, me, updates, opts } = ctx;
+    const timeout = Math.min(Math.max(int(p.timeout, "timeout") ?? 60, 0), Math.min(110, opts.maxPoll * 3));
+    const goalId = int(p.goal_id, "goal_id");
+    const goalState = () => {
+      if (goalId === undefined) return null;
+      const g = getGoal(db, goalId);
+      if (!g) throw new ApiError(400, "Bad Request: goal not found");
+      return goalObj(db, g);
+    };
+    const simplify = (u: Record<string, any>) => {
+      const m = u.message ?? u.edited_message;
+      if (!m) return null;
+      return { from: m.from?.username, text: m.text ?? m.caption ?? "", thread_id: m.message_thread_id ?? null, data: m.data ?? null,
+        file_id: m.document?.file_id ?? m.photo?.[0]?.file_id ?? null, date: m.date, edited: !!u.edited_message };
+    };
+    const g0 = goalState();
+    if (g0 && g0.status !== "doing") return { goal: g0, messages: [], done: true };
+    const cur = (db.query("SELECT last_update_id FROM wait_cursor WHERE account_id = ?").get(me.id) as { last_update_id: number } | null)?.last_update_id ?? 0;
+    const deadline = Date.now() + timeout * 1000;
+    let got: Record<string, any>[] = [];
+    let offset = cur + 1;
+    // 分段等待：每段最多 maxPoll 秒，期間目標結束也能及時回傳
+    while (true) {
+      const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      got = await updates.poll(me.id, { offset, limit: 50, timeout: Math.min(left, opts.maxPoll), signal: ctx.signal }) as Record<string, any>[];
+      const g = goalState();
+      if (got.length || (g && g.status !== "doing") || left === 0 || ctx.signal?.aborted) break;
+    }
+    if (got.length) {
+      const last = got[got.length - 1].update_id as number;
+      db.query("INSERT INTO wait_cursor (account_id, last_update_id) VALUES (?, ?) ON CONFLICT(account_id) DO UPDATE SET last_update_id = excluded.last_update_id").run(me.id, last);
+      db.query("DELETE FROM updates WHERE account_id = ? AND update_id <= ?").run(me.id, last);
+    }
+    const goal = goalState();
+    // 只回傳跟我有關的：私訊、@我、我開的目標底下的訊息
+    const myGoals = new Set((db.query("SELECT id FROM goals WHERE created_by = ? OR lead_id = ?").all(me.id, me.id) as { id: number }[]).map((r) => r.id));
+    const mine = got.filter((u) => {
+      const m = u.message ?? u.edited_message;
+      if (!m) return false;
+      if (m.chat?.type === "private") return true;
+      if ((m.text ?? m.caption ?? "").includes(`@${me.username}`)) return true;
+      const gid = m.data?.goal_id ?? m.message_thread_id;
+      return gid !== undefined && myGoals.has(gid);
+    });
+    return { goal, messages: mine.map(simplify).filter(Boolean), done: goal ? goal.status !== "doing" : false };
   },
 
   getAgents(ctx) {

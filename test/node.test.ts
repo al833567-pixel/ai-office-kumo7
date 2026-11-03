@@ -105,7 +105,7 @@ describe("office run（Hermes 接線）", () => {
     expect(done.result).not.toMatch(/[│╭╰]/);         // 沒有框線
     // 工作階段與完整過程記在任務上，給人日後查
     expect(done.session_ref).toBe("local-1a2b3c");
-    expect(done.log_ref).toMatch(/^B 機：.*hermes-.*\.log$/);
+    expect(done.log_ref).toMatch(/^B 機：.*worker-.*\.log$/);
     const logFile = done.log_ref.replace(/^B 機：/, "");
     expect(readFileSync(logFile, "utf8")).toContain("收到任務（檔案）"); // 走 --query-file，過程完整保存
     expect(readFileSync(logFile, "utf8")).toContain("session_id: local-1a2b3c");
@@ -166,10 +166,76 @@ describe("提示詞當參數（arg 模式）", () => {
   }, 20000);
 });
 
+describe("一台多個執行者（假 Codex／假 Gemini，提示詞走 stdin）", () => {
+  let multi: ChildProcess | undefined;
+  let mlog = "";
+  afterAll(() => multi?.kill());
+
+  test("同一個 office-node 同時接兩個執行者；{answer_file} 佔位字讓 CLI 直接寫結論", async () => {
+    const mk = (u: string, kind: string) => { const r = createAccount(hub.db, { username: u, firstName: u, isBot: true, kind, machine: "M" }); addMember(hub.db, OFFICE_GROUP_ID, r.account.id); tok[u] = r.token; return r.token; };
+    const tCodex = mk("codex_m", "codex"), tGem = mk("gemini_m", "gemini");
+    // 假 Codex：codex exec -o <檔> -（提示詞從 stdin），最後的回答寫進 -o 指定的檔案
+    const fakeCodex = join(dir, "fake-codex.ts");
+    writeFileSync(fakeCodex, `const a = process.argv.slice(2);
+if (a[0] === "--version") { console.log("codex-cli 0.0.0-fake"); process.exit(0); }
+const prompt = await Bun.stdin.text();
+console.log("session id: 0199-fake-codex");
+console.log("thinking…");
+const o = a[a.indexOf("-o") + 1];
+require("fs").writeFileSync(o, prompt.includes("任務") ? "Codex 完成：已修改 3 個檔案。" : "?");`);
+    // 假 Gemini：gemini -p "<指示>"，stdin 的內容接在後面
+    const fakeGem = join(dir, "fake-gemini.ts");
+    writeFileSync(fakeGem, `const a = process.argv.slice(2);
+if (a[0] === "--version") { console.log("0.0.0-fake"); process.exit(0); }
+const stdin = await Bun.stdin.text();
+console.log("過程…");
+console.log("");
+console.log(stdin.includes("任務") && a.includes("-p") ? "Gemini 完成：整理好表格。" : "沒收到提示詞");`);
+    const cfg3 = join(dir, "config-multi.json");
+    writeFileSync(cfg3, JSON.stringify({ hub: hub.url, machine: "M", workers: [
+      { token: tCodex, name: "codex_m", cmd: [BUN, fakeCodex, "-o", "{answer_file}", "-"], prompt_via: "stdin", cwd: join(dir, "work-m"), timeout_min: 1 },
+      { token: tGem, name: "gemini_m", cmd: [BUN, fakeGem, "-p", "請依照下面 stdin 的任務執行"], prompt_via: "stdin", cwd: join(dir, "work-m"), timeout_min: 1 },
+    ] }));
+    multi = spawn(BUN, [OFFICE, "run"], { env: { ...process.env, OFFICE_CONFIG: cfg3 } });
+    multi.stdout!.on("data", (b) => (mlog += b)); multi.stderr!.on("data", (b) => (mlog += b));
+    for (let i = 0; i < 100 && !(mlog.includes("@codex_m") && mlog.includes("@gemini_m")); i++) await Bun.sleep(100);
+    const g = await ok("claude_b", "createGoal", { title: "多執行者" });
+    const t1 = await ok("claude_b", "createTask", { goal_id: g.goal_id, assignee: "codex_m", title: "改程式", instructions: "改三個檔" });
+    const t2 = await ok("claude_b", "createTask", { goal_id: g.goal_id, assignee: "gemini_m", title: "整理表格", instructions: "整理" });
+    const [r1, r2] = await Promise.all([waitTask(t1.task_id, ["done", "failed"]), waitTask(t2.task_id, ["done", "failed"])]);
+    expect(r1.status).toBe("done");
+    expect(r1.result).toBe("Codex 完成：已修改 3 個檔案。");   // 只有 -o 寫的結論
+    expect(r1.session_ref).toBe("0199-fake-codex");
+    expect(r2.status).toBe("done");
+    expect(r2.result).toBe("Gemini 完成：整理好表格。");       // 沒寫 answer.md：取最後一段
+    const states = await ok("boss", "getAgents");
+    expect(states.find((a: any) => a.username === "codex_m").state).not.toBe("offline");
+  }, 30000);
+});
+
+describe("office ask（櫃台）", () => {
+  test("交目標、等主管結案，印出總結", async () => {
+    const cfgAsk = join(dir, "config-ask.json");
+    writeFileSync(cfgAsk, JSON.stringify({ hub: hub.url, machine: "B", boss_token: tok.boss }));
+    const p = Bun.spawn([BUN, OFFICE, "ask", "整理兩台電腦的磁碟報告", "--lead", "claude_b"], { env: { ...process.env, OFFICE_CONFIG: cfgAsk }, stdout: "pipe", stderr: "pipe" });
+    let goal: any = null;
+    for (let i = 0; i < 50 && !goal; i++) { goal = (await ok("boss", "getGoals", {})).find((g: any) => g.detail === "整理兩台電腦的磁碟報告"); if (!goal) await Bun.sleep(100); }
+    expect(goal.lead).toBe("claude_b");
+    await ok("claude_b", "sendMessage", { chat_id: OFFICE_GROUP_ID, message_thread_id: goal.goal_id, text: "開始處理" });
+    await ok("claude_b", "completeGoal", { goal_id: goal.goal_id, summary: "A 機 C 槽剩 313 GB；B 機 D 槽剩 120 GB。" });
+    const out = await new Response(p.stdout).text();
+    expect(await p.exited).toBe(0);
+    expect(out).toContain(`目標 #${goal.goal_id}`);
+    expect(out).toContain("claude_b：開始處理");
+    expect(out).toContain("🏁 完成");
+    expect(out).toContain("A 機 C 槽剩 313 GB");
+  }, 20000);
+});
+
 describe("office CLI", () => {
   // 非同步執行：Hub 跑在測試程式裡，同步等待會卡住 Hub
   const run = async (...args: string[]) => {
-    const p = Bun.spawn([BUN, OFFICE, ...args], { env: { ...process.env, OFFICE_CONFIG: cfgPath }, stdout: "pipe", stderr: "pipe" });
+    const p = Bun.spawn([BUN, OFFICE, ...args], { env: { ...process.env, OFFICE_CONFIG: cfgPath, OFFICE_TEST_BUN: BUN }, stdout: "pipe", stderr: "pipe" });
     const [stdout, stderr] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
     return { status: await p.exited, stdout, stderr };
   };
@@ -195,6 +261,7 @@ describe("office CLI", () => {
     expect((await run("send", "office", "CLI 測試")).stdout).toContain("已送出");
     const doc = await run("doctor");
     expect(doc.stdout).toContain("✅ Hub 連線");
-    expect(doc.stdout).toContain("hermes_token → @hermes_b");
+    expect(doc.stdout).toContain("執行者 token → @hermes_b");
+    expect(doc.stdout).toContain("✅   @hermes_b 的指令：");
   });
 });

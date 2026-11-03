@@ -149,6 +149,12 @@ CREATE TABLE IF NOT EXISTS presence (
   updated_at    INTEGER
 );
 
+-- office_wait 的讀取位置（給只用 MCP、不自己呼叫 getUpdates 的平台，例如當「櫃台」的 Hermes／Codex）
+CREATE TABLE IF NOT EXISTS wait_cursor (
+  account_id     INTEGER PRIMARY KEY REFERENCES accounts(id),
+  last_update_id INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS loop_guard (
   chat_key    TEXT    NOT NULL,
   thread_id   INTEGER NOT NULL,
