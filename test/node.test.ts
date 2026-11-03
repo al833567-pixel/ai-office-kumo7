@@ -49,7 +49,11 @@ const prompt = qi >= 0 ? require("fs").readFileSync(args[qi + 1], "utf8") : (arg
 console.log(qi >= 0 ? "收到任務（檔案），開始處理" : "收到任務，開始處理");
 if (prompt.includes("FAIL")) { console.error("做不到"); process.exit(3); }
 if (process.env.OFFICE_OUT) require("fs").writeFileSync(require("path").join(process.env.OFFICE_OUT, "report.txt"), "報表內容\\n");
-console.log("已完成：寫了 report.txt");
+// 模仿 Hermes 的終端機輸出：顏色碼、框線、session_id
+console.log("\\x1b[2m╭──────────╮\\x1b[0m");
+console.log("\\x1b[2m│\\x1b[0m 已完成：寫了 \\x1b[1;32mreport.txt\\x1b[0m \\x1b[2m│\\x1b[0m");
+console.log("\\x1b[2m╰──────────╯\\x1b[0m");
+console.log("session_id: local-1a2b3c");
 `);
   // 驗收用的小腳本：out/report.txt 存在且非空就成功（cmd.exe 與 sh 都能執行）
   checkScript = join(dir, "check-report.ts");
@@ -82,6 +86,10 @@ describe("office run（Hermes 接線）", () => {
     expect(done.status).toBe("done");
     expect(done.result).toContain("已完成");
     expect(done.result).toContain("收到任務（檔案）"); // 走 --query-file
+    expect(done.result).toContain("已完成：寫了 report.txt");
+    expect(done.result).not.toContain("\x1b");      // 沒有 ANSI 色碼
+    expect(done.result).not.toContain("session_id"); // 沒有 session_id 行
+    expect(done.result).not.toMatch(/[│╭╰]/);         // 沒有框線
     expect(done.result).toContain("結束碼 0");
     expect(done.files.length).toBe(1);
     const info = await ok("claude_b", "getFile", { file_id: done.files[0] });

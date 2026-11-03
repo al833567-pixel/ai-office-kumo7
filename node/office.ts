@@ -229,6 +229,26 @@ const shellArgs = (command: string): [string, string[], boolean] => platform() =
   : ["/bin/sh", ["-c", command], false];
 const tail = (s: string, n: number) => (s.length > n ? "…" + s.slice(-n) : s).trim();
 
+/** 整理 Hermes 的終端機輸出，讓回報文字乾淨：
+ *  去掉 ANSI 跳脫碼（顏色、游標、OSC 標題）、\r 覆寫、只有框線的行、行首行尾的框線，以及 session_id 行。 */
+function cleanOutput(raw: string): string {
+  const BOX = "─━│┃┄┅┆┇┈┉┊┋┌┍┎┏┐┑┒┓└┕┖┗┘┙┚┛├┝┞┟┠┡┢┣┤┥┦┧┨┩┪┫┬┭┮┯┰┱┲┳┴┵┶┷┸┹┺┻┼┽┾┿╀╁╂╃╄╅╆╇╈╉╊╋═║╒╓╔╕╖╗╘╙╚╛╜╝╞╟╠╡╢╣╤╥╦╧╨╩╪╫╬╭╮╯╰╴╵╶╷";
+  const boxOnly = new RegExp(`^[\\s${BOX}]*$`);
+  const edge = new RegExp(`^\\s*[${BOX}]\\s?|\\s?[${BOX}]\\s*$`, "g");
+  return raw
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")          // OSC（視窗標題、超連結）
+    .replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "")                      // CSI（顏色、游標移動）
+    .replace(/\x1b[@-Z\\-_]/g, "")                                // 其他兩字元跳脫
+    .split("\n")
+    .map((line) => (line.includes("\r") ? line.split("\r").filter(Boolean).pop() ?? "" : line)) // 進度列覆寫只留最後一次
+    .filter((line) => !/^\s*session_id\s*[:=]\s*\S+\s*$/i.test(line))
+    .filter((line) => !boxOnly.test(line) || line.trim() === "")
+    .map((line) => line.replace(edge, "").replace(/\s+$/, ""))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 async function askHermes(cfg: Config, prompt: string, o: { cwd: string; env: Record<string, string>; onOutput?: (s: string) => void; signal?: AbortSignal }) {
   const h = cfg.hermes ?? {};
   const timeoutMs = (h.timeout_min ?? 30) * 60_000;
@@ -245,7 +265,7 @@ async function askHermes(cfg: Config, prompt: string, o: { cwd: string; env: Rec
       const body = await res.json() as any;
       const text = body?.choices?.[0]?.message?.content ?? JSON.stringify(body).slice(0, 2000);
       o.onOutput?.(text);
-      return { code: res.ok ? 0 : 1, out: String(text), timedOut: false };
+      return { code: res.ok ? 0 : 1, out: cleanOutput(String(text)), timedOut: false };
     } catch (e) {
       return { code: 1, out: `Hermes API 錯誤：${(e as Error).message}`, timedOut: ctrl.signal.aborted };
     } finally { clearTimeout(timer); }
@@ -258,7 +278,10 @@ async function askHermes(cfg: Config, prompt: string, o: { cwd: string; env: Rec
   }
   // Windows 上 Python 程式（Hermes）被導向輸出時預設用系統編碼（例如 cp950），強制 UTF-8 免得中文變亂碼
   const utf8 = platform() === "win32" ? { PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" } : {};
-  return runProcess(bin, [...args, last], { cwd: o.cwd, env: { ...utf8, ...(h.env ?? {}), ...o.env }, timeoutMs, onOutput: o.onOutput, signal: o.signal });
+  // 請 Hermes 不要輸出顏色與框線（多數 CLI 認得 NO_COLOR / TERM=dumb）；仍有的話由 cleanOutput 清掉
+  const plain = { NO_COLOR: "1", FORCE_COLOR: "0", TERM: "dumb", COLUMNS: "200" };
+  const r = await runProcess(bin, [...args, last], { cwd: o.cwd, env: { ...utf8, ...plain, ...(h.env ?? {}), ...o.env }, timeoutMs, onOutput: o.onOutput, signal: o.signal });
+  return { ...r, out: cleanOutput(r.out) };
 }
 
 async function cmdRun(cfg: Config) {
@@ -352,9 +375,9 @@ async function cmdRun(cfg: Config) {
     let lastEdit = "";
     const typing = setInterval(() => hermesHub!.call("sendChatAction", { chat_id: OFFICE_GROUP, action: "typing" }).catch(() => {}), 4000);
     const progress = setInterval(async () => {
-      const line = tail(buf, 300).split("\n").filter(Boolean).pop() ?? "執行中";
+      const line = tail(cleanOutput(buf), 300).split("\n").filter(Boolean).pop() ?? "執行中";
       hermesHub!.call("progressTask", { task_id: d.task_id, note: line.slice(0, 200) }).catch(() => {});
-      const view = `▶️ #${d.task_id} 執行中…\n\n${tail(buf, 1500) || "（尚無輸出）"}`;
+      const view = `▶️ #${d.task_id} 執行中…\n\n${tail(cleanOutput(buf), 1500) || "（尚無輸出）"}`;
       if (progressMsg && view !== lastEdit) { lastEdit = view; hermesHub!.call("editMessageText", { chat_id: OFFICE_GROUP, message_id: progressMsg.message_id, text: view }).catch(() => {}); }
     }, 30_000);
     log(`▶️ 執行 #${d.task_id} ${d.title}`);
@@ -368,7 +391,7 @@ async function cmdRun(cfg: Config) {
     if (status === "done" && d.verify) {
       const [sh, args, verbatim] = shellArgs(d.verify);
       const v = await runProcess(sh, args, { cwd: dir, timeoutMs: (cfg.verify_timeout_sec ?? 120) * 1000, env: { OFFICE_OUT: outDir }, verbatim });
-      result += `\n\n驗收：${d.verify}\n結束碼 ${v.code}${v.out.trim() ? `\n${tail(v.out, 1000)}` : ""}`;
+      result += `\n\n驗收：${d.verify}\n結束碼 ${v.code}${v.out.trim() ? `\n${tail(cleanOutput(v.out), 1000)}` : ""}`;
       if (v.code !== 0) status = "failed";
     }
     const files: string[] = [];
