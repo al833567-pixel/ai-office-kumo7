@@ -408,7 +408,10 @@ async function cmdSetupDesktop(cfg: Config, args: string[]) {
   if (kind && kind !== "claude") die(`@${me.username} 不是 claude 帳號，桌面版當主管要用 claude 帳號`);
   const name = "office-desktop";
   const url = `${cfg.hub.replace(/\/+$/, "")}/mcp`;
-  const claude = (a: string[]) => spawnSync("claude", a, { encoding: "utf8", shell: IS_WIN });
+  // Windows 的 claude 可能是 .cmd，要經過 shell；參數含空白（Authorization 標頭），所以自己加引號
+  const claude = (a: string[]) => IS_WIN
+    ? spawnSync(["claude", ...a].map((x) => /[\s"]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x).join(" "), { encoding: "utf8", shell: true })
+    : spawnSync("claude", a, { encoding: "utf8" });
   claude(["mcp", "remove", name, "-s", "user"]);
   const r = claude(["mcp", "add", "--transport", "http", "-s", "user", name, url, "--header", `Authorization: Bearer ${token}`]);
   const skillSrc = join(import.meta.dir, "..", "claude", "skill-office", "SKILL.md");
