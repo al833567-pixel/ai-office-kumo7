@@ -246,7 +246,7 @@ B 機：
 powershell -ExecutionPolicy Bypass -File scripts\windows\install-tasks.ps1 -Node
 ```
 
-工作會在登入時啟動，掛掉後每分鐘自動重啟；日誌在 `data\logs\`。移除：加 `-Uninstall`。（Hermes 改在 WSL 跑的話才需要 `-WslHermes`。）
+工作會在登入時於背景啟動（用 `conhost --headless`，不開 cmd 視窗）；異常結束每分鐘重試，另有每 5 分鐘一次的看門狗，工作沒在跑（例如被關掉）就重新啟動。日誌在 `data\logs\`。要看到視窗除錯就加 `-Visible`；移除加 `-Uninstall`。重新註冊前若舊的工作還在背景跑，先在工作管理員結束 `bun.exe`。（Hermes 改在 WSL 跑的話才需要 `-WslHermes`。）
 
 辦公室用的 Claude Code（`office-claude.cmd`）要在終端機互動執行，不適合放進排程。
 

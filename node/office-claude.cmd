@@ -1,10 +1,11 @@
 @echo off
-rem 啟動「辦公室用」的 Claude Code：載入 office 頻道外掛（開發者頻道，啟動時會有一次確認畫面）。
-rem 只有用這個指令開的 session 會連到 Hub；平常開的 claude 不受影響。
-rem   office-claude              這台的主要 Claude（設定在 %USERPROFILE%\.claude\channels\office）
-rem   office-claude claude_c     同一台的另一個 Claude（先執行 office setup-claude --as claude_c）
-rem   其餘參數會原樣傳給 claude
-rem （echo 用英文：cmd 預設以系統編碼讀檔，中文會變亂碼）
+rem Start the "office" Claude Code session: loads the office channel plugin
+rem (development channel; a confirmation screen appears once at startup).
+rem Only sessions started with this command connect to the Hub; plain `claude` is unaffected.
+rem   office-claude              main Claude on this machine (config in %USERPROFILE%\.claude\channels\office)
+rem   office-claude claude_c     another Claude on this machine (run office setup-claude --as claude_c first)
+rem   Other arguments are passed to claude unchanged.
+rem NOTE: keep this file pure ASCII (cmd.exe reads it in the system code page).
 setlocal
 where claude >nul 2>nul
 if errorlevel 1 (

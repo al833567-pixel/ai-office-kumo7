@@ -265,3 +265,15 @@ describe("office CLI", () => {
     expect(doc.stdout).toContain("✅   @hermes_b 的指令：");
   });
 });
+
+describe("Windows 腳本", () => {
+  test(".cmd 檔只能有 ASCII（cmd.exe 用系統編碼讀檔，中文註解會被當成指令執行）", () => {
+    const { readdirSync, readFileSync } = require("node:fs");
+    const { join } = require("node:path");
+    const root = join(import.meta.dir, "..");
+    const files = [...readdirSync(join(root, "scripts", "windows")).map((f: string) => join(root, "scripts", "windows", f)),
+      ...readdirSync(join(root, "node")).map((f: string) => join(root, "node", f))].filter((f: string) => f.endsWith(".cmd"));
+    expect(files.length).toBeGreaterThanOrEqual(4);
+    for (const f of files) expect({ f, bad: /[^\x00-\x7F]/.test(readFileSync(f, "utf8")) }).toEqual({ f, bad: false });
+  });
+});
