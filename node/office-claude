@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 # 啟動「辦公室用」的 Claude Code：載入 office 頻道外掛（開發者頻道，啟動時會有一次確認畫面）。
-# 只有用這個指令開的 session 會連到 Hub 收派工、回報狀態；平常開的 claude 不受影響。
+# 只有用這個指令開的 session 會連到 Hub；平常開的 claude 不受影響。
+#   office-claude              這台的主要 Claude（設定在 ~/.claude/channels/office）
+#   office-claude claude_c     同一台的另一個 Claude（先執行 office setup-claude --as claude_c）
+#   其餘參數會原樣傳給 claude，例如 office-claude --continue
+if ! command -v claude >/dev/null 2>&1; then
+  echo "[office-claude] 'claude' is not on PATH. Install Claude Code: https://docs.claude.com/claude-code" >&2
+  exit 1
+fi
+if [ -n "${1:-}" ] && [ "${1#-}" = "$1" ]; then
+  export OFFICE_STATE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/channels/office-$1"
+  export OFFICE_AS="$1"   # 這個 session 裡執行 office upload／download 時用這個帳號
+  if [ ! -f "$OFFICE_STATE_DIR/.env" ]; then echo "[office-claude] $OFFICE_STATE_DIR/.env not found. Run: office setup-claude --as $1" >&2; exit 1; fi
+  shift
+fi
 export OFFICE_SESSION=1
-export OFFICE_AS=claude
+export OFFICE_AS="${OFFICE_AS:-claude}"
 exec claude --dangerously-load-development-channels plugin:office@office-local "$@"

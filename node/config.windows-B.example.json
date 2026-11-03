@@ -3,5 +3,6 @@
   "machine": "B",
   "claude_token": "7000000002:貼上 claude_b 的 token",
   "approvers": [1000000001],
+  "workers": [],
   "claude_process_pattern": "office@office-local"
 }

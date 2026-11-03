@@ -4,3 +4,4 @@ data/
 *.db-*
 tokens.local.json
 hub.env.cmd
+hub.env

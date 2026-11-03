@@ -56,7 +56,7 @@ if ($WslHermes) {
   }
   $d = if ($Distro) { "-d $Distro " } else { "" }
   # 用 login shell 讓 ~/.bun/bin 與 hermes 在 PATH 裡
-  $cmd = "cd '$WslProject' && exec bash scripts/wsl/run-office-node.sh"
+  $cmd = "cd '$WslProject' && exec bash scripts/linux/start-office-node.sh"
   Register-OfficeTask $names.Wsl "wsl.exe" "$d-e bash -lc `"$cmd`""
 }
-Write-Host "日誌：$root\data\logs\（WSL 端在 ~/.office/office-node.log）"
+Write-Host "日誌：$root\data\logs\"

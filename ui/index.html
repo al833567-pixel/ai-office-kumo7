@@ -78,7 +78,7 @@ button,select,input{font:inherit;color:inherit}
 .tag.goal{background:var(--honey);color:var(--honey-ink);border-color:transparent;font-family:var(--f-round);font-weight:900}
 .tag.warn{border-color:var(--st-stalled);color:#9A6A12}
 .av{width:9px;height:9px;border-radius:50%;display:inline-block}
-.av.claude{background:#E9967A}.av.hermes{background:#7CC4B8}
+.av.claude{background:#E9967A}.av.hermes{background:#7CC4B8}.av.codex{background:#5E6678}.av.gemini{background:#9D8BD6}.av.antigravity{background:#7FA6E0}.av.other{background:#E8C26A}
 .mono{font-family:var(--f-mono)}
 .err{font-family:var(--f-mono);font-size:11px;color:#B8473B;background:#FBE3DE;border-radius:6px;padding:4px 6px;overflow-wrap:anywhere}
 .actions{display:flex;gap:6px;flex-wrap:wrap}
@@ -234,12 +234,10 @@ a.tag{text-decoration:none}
 const STATES={working:"工作中",review:"開會／審查",idle:"空閒",queued:"排隊",waiting:"等你批准",stalled:"卡住（偷懶）",error:"報錯",offline:"離線",done:"完成"};
 const PLACE={working:"自己的座位",review:"會議室",idle:"茶水間、娛樂室或休息區沙發",queued:"任務看板前排隊",waiting:"座位上等你批准",stalled:"釣魚池摸魚",error:"座位上冒煙",offline:"不在辦公室",done:"座位上歡呼"};
 const ST_COLOR={idle:"#A79C93",working:"#5DB585",queued:"#6FA3D8",waiting:"#E0A43A",stalled:"#E0A43A",error:"#E0675A",offline:"#8E8597",done:"#E8B830",review:"#AE8FD6"};
-const agents={
-  "claude-a":{name:"Claude-A",kind:"claude",machine:"A",state:"offline",role:null,task:null,tool:"",stallSec:0},
-  "hermes-a":{name:"Hermes-A",kind:"hermes",machine:"A",state:"offline",role:null,task:null,tool:"",stallSec:0},
-  "claude-b":{name:"Claude-B",kind:"claude",machine:"B",state:"offline",role:null,task:null,tool:"",stallSec:0},
-  "hermes-b":{name:"Hermes-B",kind:"hermes",machine:"B",state:"offline",role:null,task:null,tool:"",stallSec:0}
-};
+// 最多 8 個工位，依 Hub 上的帳號動態分配（一台 8 個、8 台各 1 個或任何組合都可以）
+const DESK_COUNT=8;
+const agents={};
+for(let i=1;i<=DESK_COUNT;i++)agents["desk"+i]={name:"空位",kind:null,machine:null,state:"offline",role:null,task:null,tool:"",stallSec:0};
 const tasks=[];
 
 /* ================= helpers ================= */
@@ -302,9 +300,9 @@ function buildBG(){
   // soft rugs
   const rug=(x0,y0,x1,y1,main,border,dot)=>{const X=x0*T+2,Y=y0*T+2,w=(x1-x0+1)*T-4,h=(y1-y0+1)*T-4;R(X+2,Y+h,w-2,2,"rgba(110,70,40,.12)");rbox(X,Y,w,h,border,shade(border,-.25));R(X+3,Y+3,w-6,h-6,main);
     for(let i=X+6;i<X+w-6;i+=8){R(i,Y+1,3,1,dot);R(i,Y+h-2,3,1,dot)}};
-  rug(2,5,11,10,"#B8D6C8","#94BCA9","#E8F3EC");rug(13,5,23,10,"#D9C6E6","#BCA2D0","#F3EBF8");
+  rug(1,5,24,9,"#B8D6C8","#94BCA9","#E8F3EC");rug(1,10,24,14,"#D9C6E6","#BCA2D0","#F3EBF8");
   rug(4,23,9,26,"#F0C7AE","#DCA486","#FBE6D8");rug(27,19,33,24,"#F6DFAE","#E3C385","#FFF4D8");rug(38,24,45,27,"#B4A3CD","#9A86B9","#E4DCF0");rug(28,4,34,10,"#CFDDBD","#B2C69B","#EEF5E4");
-  txt("A 機 · office-a",2*T+8,10*T+12,8,"#4F7564");txt("B 機 · office-b",13*T+8,10*T+12,8,"#76589A");
+  txt("工位 1–4",1*T+8,9*T+12,7,"#4F7564");txt("工位 5–8",1*T+8,14*T+12,7,"#76589A");
   // windows with curtains
   const win=(x,y)=>{box(x,y,30,22,"#FFFFFF","#8B6A4E");R(x+2,y+2,26,18,"#BFE3F2");R(x+2,y+2,26,6,"#D9EFF7");R(x+14,y+2,2,18,"#FFFFFF");R(x+2,y+10,26,2,"#FFFFFF");
     R(x-3,y-1,6,24,"#F2C7C3");R(x+27,y-1,6,24,"#F2C7C3");R(x-3,y-1,6,2,"#E5A9A4");R(x+27,y-1,6,2,"#E5A9A4");R(x-4,y-3,38,2,"#B88E64")};
@@ -337,27 +335,37 @@ const desks={};
 function desk(dx,dy,id){
   desks[id]={dx,dy};
   obj(dx,dy,4,2,true,()=>{
-    const X=dx*T,Y=dy*T,a=agents[id],st=a.state;
+    const X=dx*T,Y=dy*T,a=agents[id],st=a.state,empty=!a.kind;
     shadow(X+2,Y+30,62,3);
     box(X,Y-2,64,20,"#E2B07C");R(X+1,Y+15,62,2,"#CC9862");box(X+2,Y+17,60,12,"#C58F5C");R(X+28,Y+21,8,2,"#8E6440");R(X+2,Y+28,4,4,"#8E6440");R(X+58,Y+28,4,4,"#8E6440");
     // cute cream monitor (back view)
     const glow=st==="working"||st==="done"?"#9CE6BF":st==="error"?"#FF8E80":null;
     if(glow){C.fillStyle=glow;C.globalAlpha=.35+.15*Math.sin(now*3);C.fillRect(X+3,Y-20,28,22);C.globalAlpha=1}
-    rbox(X+6,Y-17,22,16,"#F3E8D6");R(X+9,Y-14,16,1,"#E2D3BD");R(X+14,Y-2,6,3,"#D9C7AC");
+    rbox(X+6,Y-17,22,16,empty?"#E3D8C6":"#F3E8D6");R(X+9,Y-14,16,1,"#E2D3BD");R(X+14,Y-2,6,3,"#D9C7AC");
     if(st==="error"&&Math.floor(now*3)%2){R(X+15,Y-24,4,4,"#E0675A")}
     rbox(X+34,Y+3,17,6,"#FFFDF7");for(let i=0;i<6;i++)R(X+36+i*2,Y+5,1,1,"#CDBFA9");
     rbox(X+54,Y+1,7,8,"#FFFFFF");R(X+60,Y+3,2,3,"#FFFFFF");R(X+55,Y+2,5,1,"#9C6A48");
+    // 桌上小物依角色不同：Claude 檯燈、Hermes 文件、Codex 終端機貼紙、Gemini／Antigravity 星星、其他盆栽
     if(a.kind==="hermes"){R(X+2,Y+1,10,7,"#FFFDF7");R(X+3,Y+3,8,1,"#E2D3BD");R(X+3,Y+5,6,1,"#E2D3BD")}
-    else{R(X+3,Y-6,2,8,"#8E6440");R(X+1,Y-9,7,4,"#F4C77A");R(X+2,Y-10,5,1,"#E6B35E")}
-    txt(a.name,X+32,Y+26,6,"#7A5638","center",900);
+    else if(a.kind==="codex"){rbox(X+2,Y+1,11,7,"#3A3F4B");R(X+4,Y+3,2,1,"#9CE6BF");R(X+7,Y+3,4,1,"#9CE6BF");R(X+4,Y+5,5,1,"#9CE6BF")}
+    else if(a.kind==="gemini"||a.kind==="antigravity"){R(X+6,Y+1,2,7,"#F4C24A");R(X+3,Y+4,8,1,"#F4C24A");R(X+5,Y+2,4,5,"#F4C24A");R(X+6,Y+3,2,3,"#FFF4C2")}
+    else if(a.kind==="claude"){R(X+3,Y-6,2,8,"#8E6440");R(X+1,Y-9,7,4,"#F4C77A");R(X+2,Y-10,5,1,"#E6B35E")}
+    else if(!empty){R(X+3,Y+3,6,5,"#D9906A");R(X+2,Y-1,8,4,"#7FB46E")}
+    // 名牌最多 58px：放得下就加上機器，放不下只留名字，再放不下就截短
+    let plate=empty?"空位":`${a.name}${a.machine?" · "+a.machine+" 機":""}`;
+    C.font=`900 6px ${FONT}`;
+    if(!empty&&C.measureText(plate).width>58)plate=a.name;
+    while(plate.length>2&&C.measureText(plate).width>58)plate=plate.slice(0,-2)+"…";
+    txt(plate,X+32,Y+26,6,empty?"#B39A80":"#7A5638","center",900);
   });
-  if(agents[id].kind==="claude")lights.push({x:(dx+0.3)*T,y:(dy-0.5)*T,r:30,a:.18});
+  lights.push({x:(dx+0.3)*T,y:(dy-0.5)*T,r:30,a:.14});
   const sx=(dx+2.5)*T,sy=(dy+0.25)*T;
   obj(dx,dy,0,0,false,()=>{rbox(sx-9,sy-22,18,16,"#A9B9D6");R(sx-7,sy-20,14,2,"#C3D0E6")},sy-2);
 }
-desk(3,7,"claude-a");desk(8,7,"hermes-a");desk(14,7,"claude-b");desk(19,7,"hermes-b");
-for(const [dx,dy] of [[3,13],[14,13]])obj(dx,dy,4,2,true,()=>{const X=dx*T,Y=dy*T;shadow(X+2,Y+30,62,3);box(X,Y-2,64,20,"#DDA977");box(X+2,Y+17,60,12,"#BE8856");rbox(X+8,Y-14,20,13,"#EDE3D2");plant(X+52,Y+10)});
-obj(22,13,2,1,true,()=>{const X=22*T,Y=13*T;shadow(X+1,Y+14,30,3);rbox(X,Y-8,32,22,"#F1ECE2");R(X+4,Y-2,24,3,"#8E8170");R(X+6,Y+7,20,2,"#FFFFFF");R(X+24,Y-6,4,2,"#9CE6BF")});
+// 兩排各 4 張桌子：第一排 y=7、第二排 y=12
+[[2,7],[8,7],[14,7],[20,7],[2,12],[8,12],[14,12],[20,12]].forEach(([dx,dy],i)=>desk(dx,dy,"desk"+(i+1)));
+// （原本的空桌拿掉，位置留給第二排工位）
+obj(22,15,2,1,true,()=>{const X=22*T,Y=15*T;shadow(X+1,Y+14,30,3);rbox(X,Y-8,32,22,"#F1ECE2");R(X+4,Y-2,24,3,"#8E8170");R(X+6,Y+7,20,2,"#FFFFFF");R(X+24,Y-6,4,2,"#9CE6BF")});
 for(const [x,y] of [[1,3],[24,3],[1,16],[24,16],[1,19],[24,28],[26,3],[35,11],[46,14],[37,28],[26,28],[35,28]])obj(x,y,1,1,true,()=>plant(x*T+8,y*T+15,true));
 // kanban board on wall
 obj(9,1,7,2,false,()=>{const X=9*T,Y=T;box(X-2,Y,116,30,"#FFFFFF","#9C7350");R(X-2,Y+28,116,3,"#C9A077");
@@ -441,7 +449,7 @@ const SPOTS={
 };
 for(const id of Object.keys(desks)){const d=desks[id];SPOTS["seat-"+id]={tx:d.dx+2,ty:d.dy-1,x:d.dx+2.5,y:d.dy+0.25,face:"down",sit:1,desk:1}}
 SPOTS.books={tx:22,ty:20,x:22.5,y:20.8,face:"up"};      // 看書架
-SPOTS.printer={tx:22,ty:14,x:22.6,y:14.8,face:"up"};    // 影印機旁
+SPOTS.printer={tx:22,ty:16,x:22.6,y:16.8,face:"up"};    // 影印機旁
 SPOTS.petcat={tx:13,ty:25,x:13.6,y:25.6,face:"left"};   // 摸摸貓
 SPOTS.window={tx:3,ty:3,x:3.6,y:3.7,face:"up"};          // 工作區窗邊發呆
 const IDLE=["coffee","arcade1","sofa1","pongL","tableT","water","bean1","arcade2","sofa2","tableL","bean2","tableR","sofa3","books","printer","petcat","window"];
@@ -480,11 +488,15 @@ function retarget(id,instant){
 for(const [id,a] of Object.entries(agents))Object.assign(a,{id,x:0,y:0,path:[],face:"down",spot:null,arrived:true,hidden:false,idleSeed:id==="claude-b"?1:id.length,walkT:0,catchT:4+Math.random()*4,caught:0});
 
 /* ================= characters (outlined sprite) ================= */
-const PAL={claude:{shirt:"#EE9C80",shirt2:"#D9806A",hair:"#7A5040",hair2:"#946450"},hermes:{shirt:"#86CBBE",shirt2:"#69B0A3",cap:"#5D9C92",wing:"#FFF8EC"}};
+const PAL={claude:{shirt:"#EE9C80",shirt2:"#D9806A",hair:"#7A5040",hair2:"#946450"},hermes:{shirt:"#86CBBE",shirt2:"#69B0A3",cap:"#5D9C92",wing:"#FFF8EC"},
+  codex:{shirt:"#5E6678",shirt2:"#4A5160",hair:"#2E2B33",hair2:"#46424E",phones:"#F4F1EA"},
+  gemini:{shirt:"#9D8BD6",shirt2:"#8473C2",hair:"#3F4E8C",hair2:"#5A6BB0",star:"#F4C24A"},
+  antigravity:{shirt:"#7FA6E0",shirt2:"#6A8FCB",hair:"#2F3E6E",hair2:"#4A5D96",star:"#F4C24A"},
+  other:{shirt:"#E8C26A",shirt2:"#D2A94E",cap:"#C0703F",hair:"#5E4332"}};
 const spr=document.createElement("canvas");spr.width=32;spr.height=44;const sc=spr.getContext("2d");
 const sil=document.createElement("canvas");sil.width=32;sil.height=44;const sl=sil.getContext("2d");
 function sprite(a,o){
-  const prev=C;C=sc;sc.clearRect(0,0,32,44);const x=16,y=40,p=PAL[a.kind],face=o.face,r=(xx,yy,w,h,c)=>R(x+xx,y+yy,w,h,c);
+  const prev=C;C=sc;sc.clearRect(0,0,32,44);const x=16,y=40,p=PAL[a.kind]||PAL.other,face=o.face,r=(xx,yy,w,h,c)=>R(x+xx,y+yy,w,h,c);
   const skin="#FFE1CD",eye="#4E3829";
   if(!o.sit){const f=o.step||0;r(-4,-5,3,f===1?3:5,"#6E5F86");r(1,-5,3,f===2?3:5,"#6E5F86");r(-4,-1+(f===1?-2:0),3,1,"#4E3829");r(1,-1+(f===2?-2:0),3,1,"#4E3829")}
   const by=o.sit?-2:0;
@@ -496,9 +508,22 @@ function sprite(a,o){
     if(face==="up"){r(-6,hy-1,12,11,p.hair);r(-5,hy-2,10,2,p.hair)}
     else{r(-6,hy-1,12,4,p.hair);r(-5,hy-2,10,2,p.hair);r(-3,hy-1,4,1,p.hair2);r(0,hy-4,1,2,p.hair);r(1,hy-5,2,1,p.hair);
       if(face==="down"){r(-6,hy+3,2,5,p.hair);r(4,hy+3,2,5,p.hair);r(-4,hy+3,3,1,p.hair)}else if(face==="left")r(3,hy+2,3,7,p.hair);else r(-6,hy+2,3,7,p.hair)}
-  }else{
+  }else if(a.kind==="hermes"){
     r(-6,hy-2,12,5,p.cap);r(-5,hy-3,10,1,p.cap);r(-4,hy-2,4,1,shade(p.cap,.3));if(face==="up")r(-6,hy+3,12,6,"#6B4A3A");else r(-6,hy+3,12,1,"#6B4A3A");
     r(-9,hy-1,3,2,p.wing);r(-10,hy-3,2,2,p.wing);r(6,hy-1,3,2,p.wing);r(8,hy-3,2,2,p.wing);
+  }else if(a.kind==="codex"){
+    // 短髮＋白色耳機
+    if(face==="up")r(-6,hy-1,12,9,p.hair);else{r(-6,hy-1,12,4,p.hair);r(-5,hy-2,10,2,p.hair);r(-2,hy-1,5,1,p.hair2)}
+    r(-6,hy-3,12,1,p.phones);r(-7,hy-2,1,3,p.phones);r(6,hy-2,1,3,p.phones);r(-8,hy+1,2,4,p.phones);r(6,hy+1,2,4,p.phones);
+  }else if(a.kind==="gemini"||a.kind==="antigravity"){
+    // 長髮＋星星髮夾
+    if(face==="up")r(-6,hy-1,12,13,p.hair);
+    else{r(-6,hy-1,12,4,p.hair);r(-5,hy-2,10,2,p.hair);r(-3,hy-1,5,1,p.hair2);
+      if(face==="down"){r(-7,hy+2,2,10,p.hair);r(5,hy+2,2,10,p.hair)}else if(face==="left")r(3,hy+2,4,10,p.hair);else r(-7,hy+2,4,10,p.hair)}
+    r(3,hy-2,3,1,p.star);r(4,hy-3,1,3,p.star);
+  }else{
+    // 其他平台：鴨舌帽
+    r(-6,hy-2,12,4,p.cap);r(-5,hy-3,10,1,p.cap);if(face!=="up")r(face==="left"?-9:3,hy+1,6,1,shade(p.cap,-.15));if(face==="up")r(-6,hy+2,12,6,p.hair);
   }
   if(face!=="up"){
     const ey=hy+6,ex=face==="down"?[-3,2]:face==="left"?[-4]:[3];
@@ -623,12 +648,19 @@ function notify(title, body) {
 }
 
 /* ---------- 帳號 → 畫面上的位置 ---------- */
+// 帳號依「機器 → 種類 → 建立順序」排好，依序坐進 8 個工位；超過 8 位的不顯示在辦公室（看板與聊天照常）
+const KIND_ORDER = ["claude", "codex", "antigravity", "gemini", "hermes"];
 function mapAccounts() {
-  for (const a of accounts) {
-    if (!a.is_bot) continue;
-    const slot = `${a.kind}-${String(a.machine || "").toLowerCase()}`;
-    if (agents[slot] && !userOf[slot]) { slotOf[a.username] = slot; userOf[slot] = a.username; agents[slot].name = a.first_name; }
-  }
+  const bots = accounts.filter((a) => a.is_bot).sort((x, y) =>
+    String(x.machine ?? "~").localeCompare(String(y.machine ?? "~")) ||
+    ((KIND_ORDER.indexOf(x.kind) + 99) % 99) - ((KIND_ORDER.indexOf(y.kind) + 99) % 99) || x.id - y.id);
+  bots.slice(0, DESK_COUNT).forEach((b, i) => {
+    const slot = "desk" + (i + 1);
+    if (userOf[slot] && userOf[slot] !== b.username) return;
+    slotOf[b.username] = slot; userOf[slot] = b.username;
+    Object.assign(agents[slot], { name: b.first_name, kind: b.kind, machine: b.machine });
+  });
+  if (bots.length > DESK_COUNT) console.warn(`辦公室最多 ${DESK_COUNT} 個工位，${bots.slice(DESK_COUNT).map((b) => b.username).join("、")} 不會顯示在辦公室`);
 }
 
 function applyAgent(u, s, fromEvent) {
@@ -796,7 +828,7 @@ function renderDrawer() {
   for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) av.drawImage(sil, -4 + dx, -12 + dy); av.drawImage(spr, -4, -12);
   $("#dName").textContent = a.name + (u ? "" : "（未設定帳號）");
   $("#dMeta").innerHTML = `<span class="pill" style="--st:${ST_COLOR[a.state]}">${STATES[a.state] || a.state}</span>` + (a.role ? `<span class="role${a.role === "reviewer" ? " rev" : ""}">${a.role === "owner" ? "主管" : "審查"}</span>` : "") +
-    `<span>${a.machine} 機 · ${a.kind === "claude" ? "Claude Code" : "Hermes 本地模型"}${a.kind === "claude" && a.sessionUp === false ? " · session 沒在跑" : ""}</span>`;
+    `<span>${a.machine ?? "?"} 機 · ${({ claude: "Claude Code", hermes: "Hermes", codex: "Codex CLI", gemini: "Gemini CLI", antigravity: "Antigravity CLI" })[a.kind] || a.kind || "—"}${a.kind === "claude" && a.sessionUp === false ? " · session 沒在跑" : ""}</span>`;
   $("#dNow").innerHTML = `<span>${s?.task ? `<b>#${s.task.task_id} ${esc(s.task.title)}</b>` : "沒有進行中的任務"}</span><span class="where">現在位置：${PLACE[a.state] || ""}</span>` +
     (s?.detail ? `<span class="mono">${esc(s.detail)}</span>` : "") + (s?.last_seen ? `<span class="hint">最後連線 ${fmtTime(s.last_seen)}${s.last_activity ? ` · 最後動作 ${fmtTime(s.last_activity)}` : ""}</span>` : "");
   const lines = (agentLog[selected] || []).slice(-120);
@@ -871,7 +903,7 @@ function applySnapshot(s) {
   for (const [u, st] of Object.entries(s.agents)) applyAgent(u, st, false);
   $("#leadSelect").innerHTML = `<option value="auto">自動</option>` + accounts.filter((a) => a.kind === "claude").map((a) => `<option value="${a.username}">${esc(a.first_name)}</option>`).join("");
   $("#me").textContent = `${ME.name}（@${ME.username}）`;
-  for (const [slot, a] of Object.entries(agents)) if (!userOf[slot]) { a.name = "空位"; } // 沒有帳號的工位（例如目前只有一個 Hermes）
+  for (const [slot, a] of Object.entries(agents)) if (!userOf[slot]) { a.name = "空位"; a.kind = null; } // 沒有帳號的工位
   renderBoard(); renderChat(); refreshThreads(); renderLegend();
 }
 

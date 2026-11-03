@@ -23,8 +23,9 @@
 | `ui/index.html` | 像素辦公室 UI（Hub 首頁） |
 | `claude/` | Claude Code 本機 marketplace：`office` 頻道外掛（改寫自官方 Telegram 外掛）＋ `/office` skill |
 | `node/` | 每台 agent 機器用的 `office` 指令（Hermes 接線、檔案上傳下載、設定 Claude） |
-| `scripts/windows/`、`scripts/wsl/` | Windows 啟動腳本與工作排程器註冊；WSL 版（選用） |
-| `test/` | 51 項測試（含真正的 grammY、官方 MCP SDK、外掛端對端、假 Hermes 全流程），Windows 與 Linux 都能跑 |
+| `scripts/windows/`、`scripts/linux/` | 啟動腳本與開機常駐：Windows 工作排程器、Linux／WSL systemd |
+| `docs/平台相容.md` | 各平台（Claude、Hermes、Codex、Gemini、Antigravity）當櫃台／主管／執行者的接法與 Windows／Linux 對照 |
+| `test/` | 56 項測試（含真正的 grammY、官方 MCP SDK、外掛端對端、假 Hermes 全流程），Windows 與 Linux 都能跑 |
 
 ## 需求
 
@@ -92,20 +93,24 @@ A 機的 Hermes 是 Windows 原生版（`%LOCALAPPDATA%\hermes\bin\hermes.exe`�
 
 ### 1. 設定檔
 
-複製 `node\config.windows-A.example.json` 到 `%USERPROFILE%\.office\config.json`，填入 `claude_token`（`claude_a`）與 `hermes_token`（`hermes_a`）。Hermes 的部分範例已經寫好：
+複製 `node\config.windows-A.example.json` 到 `%USERPROFILE%\.office\config.json`，填入 `claude_token`（`claude_a`）與執行者 `hermes_a` 的 `token`。執行者寫在 `workers` 陣列裡，範例已經寫好：
 
 ```json
-"hermes": {
-  "mode": "cli",
-  "cmd": ["%LOCALAPPDATA%\\hermes\\bin\\hermes.exe", "chat", "-Q", "--query-file"],
-  "prompt_via": "file",
-  "cwd": "~/office-work",
-  "timeout_min": 30
-}
+"workers": [
+  {
+    "name": "hermes_a",
+    "token": "<hermes_a 的 token>",
+    "cmd": ["%LOCALAPPDATA%\\hermes\\bin\\hermes.exe", "chat", "-Q", "--query-file", "{prompt_file}"],
+    "cwd": "~/office-work",
+    "timeout_min": 30
+  }
+]
 ```
 
+舊版寫法（`hermes_token` 加 `hermes` 區塊）仍然有效，不必改。之後要在同一台加 Codex、Gemini 等其他執行者，就在 `workers` 多加一段，見 [docs/平台相容.md](docs/平台相容.md)。
+
 - **用絕對路徑**：工作排程器啟動時的 PATH 可能和你的終端機不同，寫完整路徑最穩。`%LOCALAPPDATA%`、`~` 會自動展開，不必寫死使用者名稱。
-- **`--query-file` 加 `prompt_via: "file"`**：office-node 把提示詞寫成檔案，再把檔案路徑接在最後一個參數。這樣可以避開 Windows 命令列的長度上限，也不會被換行或引號弄壞。想改回把提示詞直接當參數，就把 `cmd` 最後一個參數換成 `-q`，並刪掉 `prompt_via`。
+- **`--query-file {prompt_file}`**：office-node 把提示詞寫成暫存檔，`{prompt_file}` 換成它的路徑。這樣可以避開 Windows 命令列的長度上限，也不會被換行或引號弄壞。
 - **`--oneshot` 先不用加**：`-Q --query-file` 本來就是執行一次就結束。如果實測發現 Hermes 執行完沒有結束（等待輸入或停在互動畫面），再把 `"--oneshot"` 加在 `"chat"` 後面。
 - 呼叫 Hermes 時會自動設定 `PYTHONUTF8=1`，避免中文輸出變亂碼。
 - 想改用 Hermes API server（`hermes gateway` 開的 `:8642`）的話：`"mode": "api"`，再填 `api_url`、`api_key`。
@@ -136,7 +141,7 @@ bun node/office.ts run
 powershell -NoProfile -Command "if ((Get-Item out\report.csv).Length -gt 0) { exit 0 } else { exit 1 }"
 ```
 
-> 改在 WSL 跑 Hermes 的話（選用）：用 `node/config.wsl.example.json`、`scripts/wsl/run-office-node.sh`，並在 `%USERPROFILE%\.wslconfig` 設定 `networkingMode=mirrored`，WSL 才連得到 `127.0.0.1:7070`。
+> 改在 WSL 或 Linux 跑 Hermes 的話：用 `node/config.linux.example.json`、`scripts/linux/start-office-node.sh`。WSL 要在 `%USERPROFILE%\.wslconfig` 設定 `networkingMode=mirrored`，才連得到 Windows 上的 `127.0.0.1:7070`。
 
 ---
 
@@ -160,13 +165,13 @@ A 機在第二節已經建好設定檔。B 機複製 `node\config.windows-B.exam
 office doctor
 ```
 
-### 2. 寫入 Claude 設定、安裝外掛與 MCP
+### 2. 寫入 Claude 設定、安裝外掛
 
 ```bash
 office setup-claude
 ```
 
-它會寫入 `%USERPROFILE%\.claude\channels\office\.env`、`access.json`（允許其他 agent 與你傳訊息，只有 `approvers` 能批准權限），並安裝 `/office` skill。接著照它印出的三行指令做（只需一次）：
+它會寫入 `%USERPROFILE%\.claude\channels\office\.env`、`access.json`（允許其他 agent 與你傳訊息，只有 `approvers` 能批准權限），並安裝 `/office` skill。接著照它印出的兩行指令做（只需一次）：
 
 ```bash
 claude plugin marketplace add "D:\AI home\ai-office-kumo7\claude"
@@ -176,9 +181,13 @@ claude plugin marketplace add "D:\AI home\ai-office-kumo7\claude"
 claude plugin install office@office-local
 ```
 
+`office_*` 工具（開目標、派工、回報、等待…）由 office 外掛直接提供，用的是這個 session 自己的帳號，不需要再 `claude mcp add`。之前加過 `office-hub` 的話可以移除，避免工具重複：
+
 ```bash
-claude mcp add --transport http --scope user office-hub http://127.0.0.1:7070/mcp --header "Authorization: Bearer <這台的 claude token>"
+claude mcp remove office-hub -s user
 ```
+
+同一台要開第二個以上的 Claude：見 [docs/平台相容.md](docs/平台相容.md) 第四節（`office setup-claude --as <帳號>`、`office-claude <帳號>`）。
 
 ### 3. 啟動辦公室用的 Claude Code
 
@@ -202,7 +211,7 @@ scripts\windows\start-office-node.cmd
 
 ---
 
-## 四、開機自動啟動（Windows 工作排程器）
+## 四、開機自動啟動
 
 在專案根目錄開 PowerShell。A 機（Hub＋office-node，office-node 同時負責 Claude 狀態與 Hermes）：
 
@@ -220,11 +229,13 @@ powershell -ExecutionPolicy Bypass -File scripts\windows\install-tasks.ps1 -Node
 
 辦公室用的 Claude Code（`office-claude.cmd`）要在終端機互動執行，不適合放進排程。
 
+**Linux（含 WSL）**用 systemd 使用者服務：Hub 那台 `bash scripts/linux/install-services.sh --hub --node`，其他機器 `--node`，移除用 `--uninstall`。WSL 要先在 `/etc/wsl.conf` 開啟 `[boot] systemd=true`。
+
 ---
 
 ## 五、使用
 
-### 交給團隊
+### 交給團隊（三種櫃台，任選）
 
 在任一台的 office Claude Code 輸入：
 
@@ -234,11 +245,19 @@ powershell -ExecutionPolicy Bypass -File scripts\windows\install-tasks.ps1 -Node
 
 這台的 Claude 會當主管：開目標 → 看誰空閒 → 拆任務派工（Hermes 拿單一可驗證的工作，程式交給 Claude）→ 收回報、審查 → 下載檔案 → 在這個 session 跟你報告。另一個 Claude 在線時自動當審查者；不在線就不指定，由主管自己審。
 
-也可以在 UI 上方輸入目標，選主管（自動／Claude-A／Claude-B）。自動規則：目標提到哪台機器就給那台的 Claude → 誰空閒 → 手上工作最少。
+也可以在 UI 上方輸入目標，選主管（自動／Claude-A／Claude-B）。
+
+或在任何終端機（Windows、Linux 都可以）用 `office ask`，等到結案後印出總結，需要設定檔裡的 `boss_token`：
+
+```bash
+office ask "整理兩台電腦的磁碟使用量，做成表格" --download ./結果
+```
+
+Hermes、Codex、Gemini 等支援 MCP 的平台也能當櫃台（接 Hub 的 `/mcp`，用 `office_new_goal` 加 `office_wait`），見 [docs/平台相容.md](docs/平台相容.md)。自動規則：目標提到哪台機器就給那台的 Claude → 誰空閒 → 手上工作最少。
 
 ### UI
 
-- **辦公室**：角色依狀態走到不同地方；空閒的人每隔 20～45 秒會隨機換個休閒地點（茶水間、娛樂室、沙發、書架、窗邊、摸貓…），忙碌中的人留在原地。點角色看動態（hooks、訊息、任務）
+- **辦公室**：最多 8 個工位，依帳號自動分配（一台 8 個或 8 台各 1 個都可以），不同平台有不同造型；角色依狀態走到不同地方；空閒的人每隔 20～45 秒會隨機換個休閒地點（茶水間、娛樂室、沙發、書架、窗邊、摸貓…），忙碌中的人留在原地。點角色看動態（hooks、訊息、任務）
 - **小黑**：辦公室的黑色小狗，會亂逛、找人撒嬌、坐下、睡覺，偶爾冒出表情；點牠會有反應
 - **全螢幕**：辦公室畫面下方的「⛶ 全螢幕」或按 `F`，只放大辦公室畫面（不含看板與聊天）；`Esc` 或「✕ 離開全螢幕」離開
 - **目標與任務**：看板；可以中止、重跑、改派
@@ -328,6 +347,8 @@ powershell -ExecutionPolicy Bypass -File scripts\windows\install-tasks.ps1 -Node
 - `hermes chat -Q -q` 的參數依 Hermes 版本可能不同，用 `office doctor` 檢查，必要時改 `hermes.cmd` 或改用 `api` 模式
 - 同一台機器同時開多個 office session 會共用同一個 Claude 帳號，請只開一個
 - 目前只有一個 Hermes（A 機 Windows）；B 機的檔案工作要派給 Claude-B，或先把檔案傳到 A 機
+- 辦公室畫面最多 8 個工位；第 9 個以後的帳號仍能派工、聊天，只是不出現在畫面上
+- Codex、Gemini、Antigravity 的接法已預留但未實測；Gemini CLI 已停止服務個人用戶（改用 Antigravity CLI）
 - 桌面版 Hermes.exe 與 CLI 共用同一份 Hermes 設定；office-node 每個任務各執行一次 CLI，不會動到桌面版的對話
 - Hub 在家裡電腦，關機時整個系統停擺
 

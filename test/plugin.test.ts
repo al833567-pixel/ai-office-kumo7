@@ -56,10 +56,15 @@ beforeAll(async () => {
 afterAll(async () => { await client?.close(); hub.stop(); });
 
 describe("office 頻道外掛", () => {
-  test("工具清單（reply、react、download_attachment、edit_message）與說明", async () => {
+  test("工具清單：頻道工具＋由外掛轉送的 office_* 工具，以自己的帳號執行", async () => {
     const tools = (await client.listTools()).tools.map((t) => t.name);
-    expect(tools).toEqual(["reply", "react", "download_attachment", "edit_message"]);
+    expect(tools.slice(0, 4)).toEqual(["reply", "react", "download_attachment", "edit_message"]);
+    for (const t of ["office_new_goal", "office_assign", "office_report", "office_wait", "office_agents"]) expect(tools).toContain(t);
     expect(client.getInstructions()).toContain("AI office");
+    const who = await client.callTool({ name: "office_whoami", arguments: {} });
+    expect(JSON.parse((who.content as any)[0].text).username).toBe("claude_a");
+    const bad = await client.callTool({ name: "office_claim", arguments: { task_id: 99999 } });
+    expect(bad.isError).toBe(true);
   });
 
   test("群組裡 @claude_a 的派工 → 推進 session，帶 thread、data_type、task_id 與 office-data", async () => {

@@ -428,6 +428,7 @@ const mcp = new Server(
       '- "task": a task assigned to you → office_claim(task_id), do the work in this session, then office_report(task_id, "done"|"failed", result). Upload output files with `office upload <path>` and pass the file_ids.',
       '- "report" / "review" / "expired": news about a goal you lead → check it, then continue, review (office_review), reassign, or finish with office_complete_goal.',
       '- "cancel": stop working on that task.',
+      'The office_* tools (office_new_goal, office_assign, office_claim, office_report, office_agents, office_wait…) come from this same office server and act as your own office account.',
       'Plain chat from the user or a colleague → answer with the reply tool, passing chat_id back (and reply_to to stay in the same goal thread). Do not reply to messages that need no answer; the task tools already notify the right people.',
       '',
       'If the tag has image_path, Read that file. If it has attachment_file_id, call download_attachment with it, then Read the returned path. reply accepts files: ["/abs/path"] to send attachments.',
@@ -436,6 +437,30 @@ const mcp = new Server(
     ].join('\n'),
   },
 )
+
+// office_* tools are served by the hub's MCP endpoint; this plugin proxies them with
+// its own token, so each office session acts as its own agent and no separate
+// `claude mcp add` is needed (and the tools only exist in office sessions).
+let hubTools: Array<Record<string, unknown>> | null = null
+async function hubRpc(method: string, params: Record<string, unknown>): Promise<any> {
+  const res = await fetch(`${HUB}/mcp`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', authorization: `Bearer ${TOKEN}` },
+    body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method, params }),
+    signal: AbortSignal.timeout(method === 'tools/call' ? 150_000 : 10_000),
+  })
+  const body = await res.json() as { result?: any; error?: { message: string } }
+  if (body.error) throw new Error(body.error.message)
+  return body.result
+}
+async function loadHubTools(): Promise<void> {
+  try {
+    hubTools = ((await hubRpc('tools/list', {})).tools ?? []) as Array<Record<string, unknown>>
+  } catch (err) {
+    process.stderr.write(`office channel: could not load office tools from hub: ${err}\n`)
+  }
+}
+await loadHubTools()
 
 // Stores full permission details for "See more" expansion keyed by request_id.
 const pendingPermissions = new Map<string, { tool_name: string; description: string; input_preview: string }>()
@@ -471,8 +496,9 @@ mcp.setNotificationHandler(
   },
 )
 
-mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [
+mcp.setRequestHandler(ListToolsRequestSchema, async () => {
+  if (!hubTools) await loadHubTools()
+  return { tools: [
     {
       name: 'reply',
       description:
@@ -546,11 +572,19 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ['chat_id', 'message_id', 'text'],
       },
     },
-  ],
-}))
+    ...(hubTools ?? []),
+  ] }
+})
 
 mcp.setRequestHandler(CallToolRequestSchema, async req => {
   const args = (req.params.arguments ?? {}) as Record<string, unknown>
+  if (req.params.name.startsWith('office_')) {
+    try {
+      return await hubRpc('tools/call', { name: req.params.name, arguments: args })
+    } catch (err) {
+      return { content: [{ type: 'text', text: `${req.params.name} failed: ${err instanceof Error ? err.message : String(err)}` }], isError: true }
+    }
+  }
   try {
     switch (req.params.name) {
       case 'reply': {
