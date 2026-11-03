@@ -1,6 +1,6 @@
 # AI 辦公室（Office Hub）
 
-讓兩台 Windows 電腦上的 Claude Code 和（WSL 裡的）Hermes 組成一個團隊：你在任一台的 Claude Code 輸入 `/office 目標`，那台的 Claude 就當主管，拆任務派給其他人。進度、回報、檔案都經過家裡電腦上的 Hub，像素辦公室 UI 即時顯示每個人在做什麼。
+讓兩台 Windows 電腦上的 Claude Code 和 Hermes 組成一個團隊：你在任一台的 Claude Code 輸入 `/office 目標`，那台的 Claude 就當主管，拆任務派給其他人。進度、回報、檔案都經過家裡電腦上的 Hub，像素辦公室 UI 即時顯示每個人在做什麼。
 
 ```
                   Tailscale 內網（不開對外 port）
@@ -12,8 +12,8 @@
       ▲ getUpdates / MCP / hooks                    ▲
 ┌─────┴──── A 機（家裡電腦，Windows）─────┐   ┌────┴──── B 機（Windows）────┐
 │ Claude Code + office 頻道外掛（claude_a）│   │ Claude Code + 頻道外掛       │
-│ office-node（回報 Claude session）       │   │ （claude_b）＋ office-node   │
-│ WSL：Hermes + office-node（hermes_a）    │   └──────────────────────────────┘
+│ Hermes（hermes.exe，hermes_a）           │   │ （claude_b）＋ office-node   │
+│ office-node（claude_a + hermes_a）       │   └──────────────────────────────┘
 └──────────────────────────────────────────┘
 ```
 
@@ -23,15 +23,15 @@
 | `ui/index.html` | 像素辦公室 UI（Hub 首頁） |
 | `claude/` | Claude Code 本機 marketplace：`office` 頻道外掛（改寫自官方 Telegram 外掛）＋ `/office` skill |
 | `node/` | 每台 agent 機器用的 `office` 指令（Hermes 接線、檔案上傳下載、設定 Claude） |
-| `scripts/windows/`、`scripts/wsl/` | Windows 啟動腳本、工作排程器註冊、WSL 啟動腳本與 systemd 服務 |
-| `test/` | 50 項測試（含真正的 grammY、官方 MCP SDK、外掛端對端、假 Hermes 全流程），Windows 與 Linux 都能跑 |
+| `scripts/windows/`、`scripts/wsl/` | Windows 啟動腳本與工作排程器註冊；WSL 版（選用） |
+| `test/` | 51 項測試（含真正的 grammY、官方 MCP SDK、外掛端對端、假 Hermes 全流程），Windows 與 Linux 都能跑 |
 
 ## 需求
 
-實際環境：兩台 Windows；家裡電腦（A 機）跑 Hub，Hermes 跑在 A 機的 WSL2 裡。
+實際環境：兩台 Windows；家裡電腦（A 機）跑 Hub 和 Hermes（Windows 原生版）。
 
 - 兩台 Windows：[Bun](https://bun.sh)（`winget install Oven-sh.Bun`）、Git、Claude Code（用 claude.ai 帳號登入；頻道功能需要）
-- A 機的 WSL：Bun（`curl -fsSL https://bun.sh/install | bash`）、Hermes Agent
+- A 機：Hermes Agent（Windows 原生版，測過 v0.22.5）
 - 兩台之間：[Tailscale](https://tailscale.com)（只有一台時可以先不用）
 - Claude Code 頻道（channels）目前是研究預覽功能。個人 Pro/Max 可直接用；Team/Enterprise 要管理員先開啟。自製頻道每次啟動都會出現一次「開發者頻道」確認畫面。
 
@@ -56,7 +56,7 @@ bun run init
 | `boss` | 你（真人，登入 UI 用） | — |
 | `claude_a` | Claude | A 機 Windows |
 | `claude_b` | Claude | B 機 Windows |
-| `hermes_a` | Hermes | A 機 WSL |
+| `hermes_a` | Hermes | A 機 Windows |
 
 舊版 `init` 會多建一個 `hermes_b`，用不到就停用：`bun run cli disable hermes_b`。
 
@@ -66,7 +66,7 @@ bun run init
 scripts\windows\start-hub.cmd
 ```
 
-預設只聽 `127.0.0.1:7070`，同一台的 Windows 與 WSL（mirrored 網路模式）都連得到。瀏覽器開 `http://127.0.0.1:7070/`，貼上 `boss` 的 token 登入。
+預設只聽 `127.0.0.1:7070`。瀏覽器開 `http://127.0.0.1:7070/`，貼上 `boss` 的 token 登入。
 
 要讓 B 機連進來時：登入 Tailscale，在專案根目錄建立 `hub.env.cmd`，寫一行 `set HUB_HOST=<A 機的 Tailscale IP>`（用 `tailscale ip -4` 查），重開 Hub。之後 A 機自己也改用這個 IP 連。
 
@@ -85,51 +85,55 @@ scripts\windows\start-hub.cmd
 
 ---
 
-## 二、A 機的 WSL：接上 Hermes
+## 二、A 機：接上 Hermes（Windows 原生版）
 
-### 1. 讓 WSL 連得到 Hub
+A 機的 Hermes 是 Windows 原生版（`%LOCALAPPDATA%\hermes\bin\hermes.exe`），office-node 直接在 Windows 上呼叫它，不需要 WSL。同一個 office-node 同時負責 `claude_a`（回報 session 狀態）與 `hermes_a`（心跳、接派工）。
 
-在 Windows 的 `%USERPROFILE%\.wslconfig` 加上（沒有這個檔案就新建）：
+### 1. 設定檔
 
-```ini
-[wsl2]
-networkingMode=mirrored
+複製 `node\config.windows-A.example.json` 到 `%USERPROFILE%\.office\config.json`，填入 `claude_token`（`claude_a`）與 `hermes_token`（`hermes_a`）。Hermes 的部分範例已經寫好：
+
+```json
+"hermes": {
+  "mode": "cli",
+  "cmd": ["%LOCALAPPDATA%\\hermes\\bin\\hermes.exe", "chat", "-Q", "--query-file"],
+  "prompt_via": "file",
+  "cwd": "~/office-work",
+  "timeout_min": 30
+}
 ```
 
-然後在 PowerShell 執行 `wsl --shutdown` 讓設定生效。mirrored 模式下 WSL 和 Windows 共用網路，WSL 裡用 `http://127.0.0.1:7070` 就連得到 Hub，之後換成 Tailscale IP 也一樣連得到。
+- **用絕對路徑**：工作排程器啟動時的 PATH 可能和你的終端機不同，寫完整路徑最穩。`%LOCALAPPDATA%`、`~` 會自動展開，不必寫死使用者名稱。
+- **`--query-file` 加 `prompt_via: "file"`**：office-node 把提示詞寫成檔案，再把檔案路徑接在最後一個參數。這樣可以避開 Windows 命令列的長度上限，也不會被換行或引號弄壞。想改回把提示詞直接當參數，就把 `cmd` 最後一個參數換成 `-q`，並刪掉 `prompt_via`。
+- **`--oneshot` 先不用加**：`-Q --query-file` 本來就是執行一次就結束。如果實測發現 Hermes 執行完沒有結束（等待輸入或停在互動畫面），再把 `"--oneshot"` 加在 `"chat"` 後面。
+- 呼叫 Hermes 時會自動設定 `PYTHONUTF8=1`，避免中文輸出變亂碼。
+- 想改用 Hermes API server（`hermes gateway` 開的 `:8642`）的話：`"mode": "api"`，再填 `api_url`、`api_key`。
 
-在 WSL 裡確認：
-
-```bash
-curl http://127.0.0.1:7070/health
-```
-
-### 2. 設定檔與檢查
-
-WSL 可以直接用 Windows 上的專案（`/mnt/d/AI home/ai-office-kumo7`），或另外 `git clone` 一份到 WSL 家目錄（檔案存取比較快）。
-
-```bash
-mkdir -p ~/.office && cp node/config.wsl.example.json ~/.office/config.json
-```
-
-編輯 `~/.office/config.json`：填 `hermes_token`（`hermes_a` 的 token）。Hermes 的呼叫方式二選一：
-
-- `cli`（預設）：每個任務執行一次 `hermes chat -Q -q "<提示>"`，可用 `hermes.cmd` 改指令
-- `api`：呼叫 Hermes API server（`hermes gateway` 開的 `:8642`），填 `api_url`、`api_key`
+### 2. 檢查與啟動
 
 ```bash
 bun node/office.ts doctor
 ```
 
-### 3. 啟動 Hermes 接線
-
 ```bash
-bash scripts/wsl/run-office-node.sh
+bun node/office.ts run
 ```
 
-日誌在 `~/.office/office-node.log`。它會：送心跳（UI 才會顯示 Hermes 在線）、收 `@hermes_a` 的派工 → 領取任務 → 執行 Hermes → 跑驗收指令 → 上傳 `$OFFICE_OUT` 裡的檔案 → 回報，執行中每 30 秒更新進度並延長租約。真人在群組 @ 它聊天時，它會用 Hermes 回答。
+`run` 會：
+- 送 Hermes 心跳，UI 上 Hermes 才會顯示在線。
+- 檢查辦公室用的 Claude session 有沒有在跑。
+- 收到 `@hermes_a` 的派工時：領取任務 → 執行 Hermes → 跑驗收指令 → 上傳 `OFFICE_OUT` 裡的檔案 → 回報。執行中每 30 秒更新進度並延長租約。
+- 真人在群組 @ 它聊天時，它會用 Hermes 回答。
 
-注意路徑：Hermes 在 WSL 裡看到的 Windows 檔案是 `/mnt/c/...`、`/mnt/d/...`。派工給 Hermes 時路徑要寫 WSL 格式（`/office` skill 已提醒主管）。
+常駐的方式見第四節。
+
+**任務的工作目錄**是 `~/office-work/task-<編號>`，交付檔案放在裡面的 `out` 資料夾。驗收指令由 `cmd.exe` 在這個目錄裡執行，所以要寫 Windows 指令，例如：
+
+```bat
+powershell -NoProfile -Command "if ((Get-Item out\report.csv).Length -gt 0) { exit 0 } else { exit 1 }"
+```
+
+> 改在 WSL 跑 Hermes 的話（選用）：用 `node/config.wsl.example.json`、`scripts/wsl/run-office-node.sh`，並在 `%USERPROFILE%\.wslconfig` 設定 `networkingMode=mirrored`，WSL 才連得到 `127.0.0.1:7070`。
 
 ---
 
@@ -139,7 +143,7 @@ bash scripts/wsl/run-office-node.sh
 
 ### 1. 設定檔
 
-複製範例到 `%USERPROFILE%\.office\config.json`：A 機用 `node\config.windows-A.example.json`，B 機用 `node\config.windows-B.example.json`。填入這台的 `claude_token`；`hub` 在 A 機是 `http://127.0.0.1:7070`，B 機是 A 機的 Tailscale IP。
+A 機在第二節已經建好設定檔。B 機複製 `node\config.windows-B.example.json` 到 `%USERPROFILE%\.office\config.json`，填 `claude_b` 的 token，`hub` 填 A 機的 Tailscale IP。
 
 把 `node` 資料夾加進使用者 PATH（讓 Claude 能在終端機執行 `office upload`、`office download`）：
 
@@ -185,22 +189,22 @@ node\office-claude.cmd
 
 為了不被權限提示卡住，建議先把常用指令加進允許清單，或用 auto 模式。卡住時 UI 會顯示「等你批准」，你也可以直接在 UI 的「私訊／批准」按允許。
 
-### 4. Windows 端 office-node（回報 Claude session 狀態）
+### 4. office-node（回報 Claude session 狀態）
 
 ```bash
 scripts\windows\start-office-node.cmd
 ```
 
-它每 30 秒用 PowerShell `Get-CimInstance` 檢查辦公室用的 Claude Code 有沒有在跑；session 關掉時 UI 會把那個 Claude 顯示為離線。
+它每 30 秒用 PowerShell `Get-CimInstance` 檢查辦公室用的 Claude Code 有沒有在跑；session 關掉時 UI 會把那個 Claude 顯示為離線。A 機的這個程式同時也是 Hermes 接線（第二節的 `run` 就是它），不用另外再開一個。
 
 ---
 
 ## 四、開機自動啟動（Windows 工作排程器）
 
-在專案根目錄開 PowerShell。A 機（Hub＋Windows 端 node＋WSL 的 Hermes 接線）：
+在專案根目錄開 PowerShell。A 機（Hub＋office-node，office-node 同時負責 Claude 狀態與 Hermes）：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\windows\install-tasks.ps1 -Hub -Node -WslHermes
+powershell -ExecutionPolicy Bypass -File scripts\windows\install-tasks.ps1 -Hub -Node
 ```
 
 B 機：
@@ -209,7 +213,7 @@ B 機：
 powershell -ExecutionPolicy Bypass -File scripts\windows\install-tasks.ps1 -Node
 ```
 
-工作會在登入時啟動，掛掉後每分鐘自動重啟；日誌在 `data\logs\`。移除：加 `-Uninstall`。WSL 發行版不是預設的話加 `-Distro Ubuntu`。WSL 有開 systemd 的話，也可以改用 `scripts/wsl/office-node.service`（裡面有安裝說明）。
+工作會在登入時啟動，掛掉後每分鐘自動重啟；日誌在 `data\logs\`。移除：加 `-Uninstall`。（Hermes 改在 WSL 跑的話才需要 `-WslHermes`。）
 
 辦公室用的 Claude Code（`office-claude.cmd`）要在終端機互動執行，不適合放進排程。
 
@@ -318,7 +322,8 @@ powershell -ExecutionPolicy Bypass -File scripts\windows\install-tasks.ps1 -Node
 - Hermes 本地模型能接多大的任務，取決於你的模型呼叫工具穩不穩；先從小任務開始
 - `hermes chat -Q -q` 的參數依 Hermes 版本可能不同，用 `office doctor` 檢查，必要時改 `hermes.cmd` 或改用 `api` 模式
 - 同一台機器同時開多個 office session 會共用同一個 Claude 帳號，請只開一個
-- 目前只有一個 Hermes（A 機 WSL）；B 機的檔案工作要派給 Claude-B，或先把檔案傳到 A 機
+- 目前只有一個 Hermes（A 機 Windows）；B 機的檔案工作要派給 Claude-B，或先把檔案傳到 A 機
+- 桌面版 Hermes.exe 與 CLI 共用同一份 Hermes 設定；office-node 每個任務各執行一次 CLI，不會動到桌面版的對話
 - Hub 在家裡電腦，關機時整個系統停擺
 
 ## 九、開發與測試

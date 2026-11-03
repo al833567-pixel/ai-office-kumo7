@@ -26,7 +26,8 @@ interface Config {
   approvers?: number[];          // 可以批准權限的真人帳號 id（預設：hub 上所有真人）
   hermes?: {
     mode?: "cli" | "api";
-    cmd?: string[];              // cli 模式：最後會附上提示詞，例如 ["hermes","chat","-Q","-q"]
+    cmd?: string[];              // cli 模式：最後會附上提示詞（或提示詞檔案路徑），例如 ["hermes","chat","-Q","-q"]
+    prompt_via?: "arg" | "file"; // arg：提示詞當最後一個參數；file：寫成檔案，最後一個參數是檔案路徑（搭配 --query-file，Windows 建議）
     api_url?: string;            // api 模式：Hermes API server，例如 http://127.0.0.1:8642
     api_key?: string;
     model?: string;
@@ -49,7 +50,10 @@ function loadConfig(): Config {
   return cfg;
 }
 function die(msg: string): never { console.error(msg); process.exit(1); }
-const expand = (p: string) => p.replace(/^~(?=$|[\\/])/, homedir());
+// 展開 ~ 與 Windows 的 %VAR%（例如 %LOCALAPPDATA%），讓設定檔不必寫死使用者名稱
+const expand = (p: string) => p
+  .replace(/^~(?=$|[\\/])/, homedir())
+  .replace(/%([A-Za-z_][A-Za-z0-9_]*)%/g, (m, k) => process.env[k] ?? process.env[k.toUpperCase()] ?? m);
 const log = (...a: unknown[]) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
 function tokenFor(cfg: Config, who = process.env.OFFICE_AS ?? "claude"): string {
@@ -143,7 +147,7 @@ async function cmdDoctor(cfg: Config) {
   if (cfg.hermes_token) {
     const mode = cfg.hermes?.mode ?? "cli";
     if (mode === "cli") {
-      const bin = (cfg.hermes?.cmd ?? ["hermes"])[0];
+      const bin = expand((cfg.hermes?.cmd ?? ["hermes"])[0]);
       const r = spawnSync(bin, ["--version"], { encoding: "utf8" });
       ok(r.status === 0, `Hermes CLI：${bin} ${r.status === 0 ? r.stdout.trim() : "（找不到或無法執行）"}`);
     } else {
@@ -221,7 +225,7 @@ function runProcess(cmd: string, args: string[], o: { cwd: string; env?: Record<
 
 // Windows：cmd.exe 不認得反斜線跳脫的引號，所以整段命令原樣加一層引號交給 /s /c（與 cross-spawn 相同做法）
 const shellArgs = (command: string): [string, string[], boolean] => platform() === "win32"
-  ? ["cmd.exe", ["/d", "/s", "/c", `"${command}"`], true]
+  ? ["cmd.exe", ["/d", "/s", "/c", `"chcp 65001 >nul & ${command}"`], true]
   : ["/bin/sh", ["-c", command], false];
 const tail = (s: string, n: number) => (s.length > n ? "…" + s.slice(-n) : s).trim();
 
@@ -246,8 +250,15 @@ async function askHermes(cfg: Config, prompt: string, o: { cwd: string; env: Rec
       return { code: 1, out: `Hermes API 錯誤：${(e as Error).message}`, timedOut: ctrl.signal.aborted };
     } finally { clearTimeout(timer); }
   }
-  const [bin, ...args] = h.cmd ?? ["hermes", "chat", "-Q", "-q"];
-  return runProcess(bin, [...args, prompt], { cwd: o.cwd, env: { ...(h.env ?? {}), ...o.env }, timeoutMs, onOutput: o.onOutput, signal: o.signal });
+  const [bin, ...args] = (h.cmd ?? ["hermes", "chat", "-Q", "-q"]).map(expand);
+  let last = prompt;
+  if (h.prompt_via === "file") {
+    last = join(o.cwd, `prompt-${Date.now()}.txt`);
+    writeFileSync(last, prompt, "utf8");
+  }
+  // Windows 上 Python 程式（Hermes）被導向輸出時預設用系統編碼（例如 cp950），強制 UTF-8 免得中文變亂碼
+  const utf8 = platform() === "win32" ? { PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" } : {};
+  return runProcess(bin, [...args, last], { cwd: o.cwd, env: { ...utf8, ...(h.env ?? {}), ...o.env }, timeoutMs, onOutput: o.onOutput, signal: o.signal });
 }
 
 async function cmdRun(cfg: Config) {
@@ -264,7 +275,7 @@ async function cmdRun(cfg: Config) {
   if (hermesHub) {
     hermesMe = await hermesHub.call("getMe").catch((e) => die(`hermes_token 無效：${e.message}`));
     if ((cfg.hermes?.mode ?? "cli") === "cli") {
-      const bin = (cfg.hermes?.cmd ?? ["hermes"])[0];
+      const bin = expand((cfg.hermes?.cmd ?? ["hermes"])[0]);
       const r = spawnSync(bin, ["--version"], { encoding: "utf8" });
       hermesOk = r.status === 0 || !r.error;
       if (!hermesOk) log(`⚠️ 找不到 Hermes CLI（${bin}），Hermes 會顯示離線。`);
@@ -326,7 +337,7 @@ async function cmdRun(cfg: Config) {
       "",
       d.instructions,
       "",
-      `工作目錄：${dir}`,
+      `你在 ${platform() === "win32" ? "Windows（指令用 PowerShell 或 cmd，路徑像 D:\\data\\a.csv）" : "Linux"} 上執行。工作目錄：${dir}`,
       `要交付的檔案請放在：${outDir}`,
       ...(d.verify ? [`完成後系統會執行驗收指令：${d.verify}（結束碼 0 才算完成）`] : []),
       "",

@@ -44,8 +44,9 @@ beforeAll(async () => {
   const fake = join(dir, "fake-hermes.ts");
   writeFileSync(fake, `const args = process.argv.slice(2);
 if (args[0] === "--version") { console.log("fake-hermes 0.1"); process.exit(0); }
-const prompt = args.at(-1) ?? "";
-console.log("收到任務，開始處理");
+const qi = args.indexOf("--query-file");
+const prompt = qi >= 0 ? require("fs").readFileSync(args[qi + 1], "utf8") : (args.at(-1) ?? "");
+console.log(qi >= 0 ? "收到任務（檔案），開始處理" : "收到任務，開始處理");
 if (prompt.includes("FAIL")) { console.error("做不到"); process.exit(3); }
 if (process.env.OFFICE_OUT) require("fs").writeFileSync(require("path").join(process.env.OFFICE_OUT, "report.txt"), "報表內容\\n");
 console.log("已完成：寫了 report.txt");
@@ -56,15 +57,17 @@ console.log("已完成：寫了 report.txt");
   cfgPath = join(dir, "config.json");
   writeFileSync(cfgPath, JSON.stringify({
     hub: hub.url, machine: "B", claude_token: tok.claude_b, hermes_token: tok.hermes_b, approvers: [1000000001],
-    hermes: { mode: "cli", cmd: [BUN, fake], cwd: join(dir, "work"), timeout_min: 1 },
+    // Windows 建議的寫法：提示詞用 --query-file 傳；指令路徑可用 %VAR%
+    hermes: { mode: "cli", cmd: ["%OFFICE_TEST_BUN%", fake, "--query-file"], prompt_via: "file", cwd: join(dir, "work"), timeout_min: 1 },
   }));
-  node = spawn(BUN, [OFFICE, "run"], { env: { ...process.env, OFFICE_CONFIG: cfgPath } });
+  node = spawn(BUN, [OFFICE, "run"], { env: { ...process.env, OFFICE_CONFIG: cfgPath, OFFICE_TEST_BUN: BUN } });
   node.stdout!.on("data", (b) => (nodeLog += b));
   node.stderr!.on("data", (b) => (nodeLog += b));
   for (let i = 0; i < 100 && !nodeLog.includes("office-node 已啟動"); i++) await Bun.sleep(100);
 }, 20000);
 
-afterAll(() => { node?.kill(); hub.stop(); });
+afterAll(() => { node?.kill(); argNode?.kill(); hub.stop(); });
+let argNode: ChildProcess | undefined;
 
 describe("office run（Hermes 接線）", () => {
   test("心跳讓 Hermes 顯示在線", async () => {
@@ -78,6 +81,7 @@ describe("office run（Hermes 接線）", () => {
     const done = await waitTask(t.task_id, ["done", "failed"]);
     expect(done.status).toBe("done");
     expect(done.result).toContain("已完成");
+    expect(done.result).toContain("收到任務（檔案）"); // 走 --query-file
     expect(done.result).toContain("結束碼 0");
     expect(done.files.length).toBe(1);
     const info = await ok("claude_b", "getFile", { file_id: done.files[0] });
@@ -110,6 +114,25 @@ describe("office run（Hermes 接線）", () => {
     expect(reply.from.username).toBe("hermes_b");
     expect(reply.text).toContain("收到任務");
   });
+});
+
+describe("提示詞當參數（arg 模式）", () => {
+  test("另一個 Hermes 用 arg 模式也能完成任務", async () => {
+    const { account, token } = createAccount(hub.db, { username: "hermes_c", firstName: "Hermes-C", isBot: true, kind: "hermes", machine: "C" });
+    addMember(hub.db, OFFICE_GROUP_ID, account.id);
+    tok.hermes_c = token;
+    const cfg2 = join(dir, "config-arg.json");
+    writeFileSync(cfg2, JSON.stringify({ hub: hub.url, machine: "C", hermes_token: token, hermes: { mode: "cli", cmd: [BUN, join(dir, "fake-hermes.ts")], cwd: join(dir, "work-c"), timeout_min: 1 } }));
+    let log2 = "";
+    argNode = spawn(BUN, [OFFICE, "run"], { env: { ...process.env, OFFICE_CONFIG: cfg2 } });
+    argNode.stdout!.on("data", (b) => (log2 += b));
+    for (let i = 0; i < 100 && !log2.includes("office-node 已啟動"); i++) await Bun.sleep(100);
+    const g = await ok("claude_b", "createGoal", { title: "arg 模式" });
+    const t = await ok("claude_b", "createTask", { goal_id: g.goal_id, assignee: "hermes_c", title: "arg 測試", instructions: "寫報表" });
+    const r = await waitTask(t.task_id, ["done", "failed"]);
+    expect(r.status).toBe("done");
+    expect(r.result).toContain("收到任務，開始處理");
+  }, 20000);
 });
 
 describe("office CLI", () => {
