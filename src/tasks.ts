@@ -179,7 +179,27 @@ export const taskMethods: Record<string, (ctx: Ctx, p: Params) => unknown> = {
     if (!isLeadOrHuman(me, g)) throw new ApiError(403, `Forbidden: only the goal lead (@${acc(db, g.lead_id)?.username}) can assign tasks`);
     const assignee = requireAgent(db, p.assignee, "assignee");
     const title = str(p.title)?.trim();
-    const instructions = str(p.instructions)?.trim();
+    // 固定格式派工（MCP 的 office_assign 一律走這裡）：五個欄位都要填，由 Hub 組成固定格式的說明交給執行者
+    const structured = p._structured === true || p.objective !== undefined;
+    let instructions = str(p.instructions)?.trim();
+    if (structured) {
+      const fields: [string, string][] = [["objective", "目標"], ["inputs", "輸入"], ["deliverable", "交付物"], ["out_of_scope", "不要做什麼"], ["verify", "驗收"]];
+      const missing = fields.filter(([k]) => !str(p[k])?.trim());
+      if (missing.length) {
+        throw new ApiError(400, `Bad Request: office_assign 缺少必填欄位：${missing.map(([k, zh]) => `${zh}（${k}）`).join("、")}。`
+          + "每張派工都要寫：objective 要達成什麼、inputs 用到哪些輸入（路徑、file_id、前置任務的產出；沒有就寫「無」）、"
+          + "deliverable 交付什麼（檔名、格式、放在 out/，或結論要包含什麼）、out_of_scope 不要做什麼、verify 驗收方式（執行者是 Hermes 等命令列 AI 時是一行指令，結束碼 0 代表完成）。");
+      }
+      const f = (k: string) => str(p[k])!.trim();
+      instructions = [
+        `【目標】${f("objective")}`,
+        `【輸入】${f("inputs")}`,
+        ...(str(p.steps)?.trim() ? [`【建議做法】${str(p.steps)!.trim()}（做法不限，結果對就好）`] : []),
+        `【交付物】${f("deliverable")}`,
+        `【不要做】${f("out_of_scope")}`,
+        ...(str(p.instructions)?.trim() ? [`【補充】${str(p.instructions)!.trim()}`] : []),
+      ].join("\n");
+    }
     if (!title || !instructions) throw new ApiError(400, "Bad Request: title and instructions are required");
     const deps = (json<number[]>(p.depends_on, "depends_on") ?? []).map(Number);
     for (const d of deps) {

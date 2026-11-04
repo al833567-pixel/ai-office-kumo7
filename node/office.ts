@@ -38,6 +38,7 @@ interface WorkerConfig {
   cwd?: string;                   // 任務工作目錄根目錄（預設 ~/office-work）
   timeout_min?: number;
   env?: Record<string, string>;
+  rename_session?: boolean;       // 跑完後把這次的工作階段改名成「辦公室 #任務 標題」（Hermes 預設開啟）
 }
 
 interface Config {
@@ -245,6 +246,26 @@ async function askWorker(w: WorkerConfig, prompt: string, o: { cwd: string; outD
   const r = await runProcess(bin, finalArgs, { cwd: o.cwd, env: { ...utf8, ...plain, ...(w.env ?? {}), ...o.env }, timeoutMs, onOutput: o.onOutput, signal: o.signal, input: via === "stdin" && !usesPromptFile ? prompt : undefined });
   if (promptFile) { try { unlinkSync(promptFile); } catch { /* 刪不掉就留著，不影響結果 */ } }
   return { ...r, out: cleanOutput(r.out), sessionId: findSessionId(r.out) };
+}
+
+/** 把執行者這次的工作階段改成看得懂的標題，在 Hermes 的工作階段清單裡就能認出是哪個任務（失敗只記紀錄，不影響回報） */
+const renameWarned = new Set<string>();
+async function renameSession(w: WorkerConfig, sessionId: string, title: string, cwd: string) {
+  if ((w.mode ?? "cli") !== "cli") return;
+  // 執行檔本身（加上它前面的啟動器，例如 python script.py）：取到 "chat" 子指令或第一個選項為止
+  const cmd = (w.cmd ?? ["hermes"]).map(expand);
+  const prefix: string[] = [];
+  for (const a of cmd) { if (prefix.length && (a === "chat" || a.startsWith("-") || a.includes("{"))) break; prefix.push(a); }
+  const isHermes = prefix.some((a) => /hermes(\.exe|\.cmd)?$/i.test(basename(a)));
+  if (!(w.rename_session ?? isHermes)) return;
+  const [bin, ...pre] = prefix;
+  const name = title.replace(/[\r\n]+/g, " ").slice(0, 60);
+  const utf8 = IS_WIN ? { PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" } : {};
+  const r = await runProcess(bin, [...pre, "sessions", "rename", sessionId, name], { cwd, env: { ...utf8, NO_COLOR: "1", TERM: "dumb", ...(w.env ?? {}) }, timeoutMs: 30_000 });
+  if (r.code !== 0) {
+    const key = `${bin}`;
+    if (!renameWarned.has(key)) { renameWarned.add(key); log(`⚠️ 工作階段改名失敗（${bin} sessions rename，可在設定檔設 "rename_session": false 關閉）：${cleanOutput(r.out).slice(0, 200)}`); }
+  } else log(`🏷️ 工作階段 ${sessionId} 改名為「${name}」`);
 }
 
 function checkBinary(w: WorkerConfig): { ok: boolean; info: string } {
@@ -598,6 +619,7 @@ async function runWorker(cfg: Config, w: WorkerConfig) {
 
     // 完整過程存檔給人查（不送給主管）
     const logPath = join(dir, `worker-${new Date().toISOString().replace(/[:.]/g, "-")}.log`);
+    if (r.sessionId) await renameSession(w, r.sessionId, `辦公室 #${d.task_id} ${d.title}`, dir);
     try { writeFileSync(logPath, `# 任務 #${d.task_id} ${d.title}（@${me.username}）\n# session_id: ${r.sessionId ?? "（未取得）"}\n\n${r.out}\n`, "utf8"); } catch (e) { log(`寫入過程紀錄失敗：${(e as Error).message}`); }
 
     let status: "done" | "failed" = r.code === 0 && !r.timedOut ? "done" : "failed";

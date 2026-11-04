@@ -53,6 +53,7 @@ beforeAll(async () => {
   const fake = join(dir, "fake-hermes.ts");
   writeFileSync(fake, `const args = process.argv.slice(2);
 if (args[0] === "--version") { console.log("fake-hermes 0.1"); process.exit(0); }
+if (args[0] === "sessions") { require("fs").appendFileSync(require("path").join(__dirname, "renames.txt"), args.slice(1).join("|") + "\\n"); process.exit(0); }
 const qi = args.indexOf("--query-file");
 const prompt = qi >= 0 ? require("fs").readFileSync(args[qi + 1], "utf8") : (args.at(-1) ?? "");
 console.log(qi >= 0 ? "收到任務（檔案），開始處理" : "收到任務，開始處理");
@@ -74,7 +75,7 @@ if (m && !process.env.FAKE_NO_ANSWER) require("fs").writeFileSync(m[1].trim(), "
   writeFileSync(cfgPath, JSON.stringify({
     hub: hub.url, machine: "B", claude_token: tok.claude_b, hermes_token: tok.hermes_b, approvers: [1000000001],
     // Windows 建議的寫法：提示詞用 --query-file 傳；指令路徑可用 %VAR%
-    hermes: { mode: "cli", cmd: ["%OFFICE_TEST_BUN%", fake, "--query-file"], prompt_via: "file", cwd: join(dir, "work"), timeout_min: 1 },
+    hermes: { mode: "cli", cmd: ["%OFFICE_TEST_BUN%", fake, "--query-file"], prompt_via: "file", cwd: join(dir, "work"), timeout_min: 1, rename_session: true },
   }));
   node = spawn(BUN, [OFFICE, "run"], { env: { ...process.env, OFFICE_CONFIG: cfgPath, OFFICE_TEST_BUN: BUN } });
   node.stdout!.on("data", (b) => (nodeLog += b));
@@ -105,6 +106,8 @@ describe("office run（Hermes 接線）", () => {
     expect(done.result).not.toMatch(/[│╭╰]/);         // 沒有框線
     // 工作階段與完整過程記在任務上，給人日後查
     expect(done.session_ref).toBe("local-1a2b3c");
+    // 工作階段改名成「辦公室 #任務 標題」，在 Hermes 的工作階段清單裡認得出來
+    expect(readFileSync(join(dir, "renames.txt"), "utf8")).toContain(`rename|local-1a2b3c|辦公室 #${t.task_id} 寫報表`);
     expect(done.log_ref).toMatch(/^B 機：.*worker-.*\.log$/);
     const logFile = done.log_ref.replace(/^B 機：/, "");
     expect(readFileSync(logFile, "utf8")).toContain("收到任務（檔案）"); // 走 --query-file，過程完整保存

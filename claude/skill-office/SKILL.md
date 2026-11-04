@@ -37,7 +37,13 @@ description: 把一個目標交給 AI 辦公室團隊：你當主管，拆解成
     - WSL／Linux：`grep -q "name,size" out/report.csv && [ "$(wc -l < out/report.csv)" -ge 2 ]`
   - 要用另一台的檔案：先請那台的 agent 用 `office upload` 傳上來，再在任務說明裡附 file_id，讓這台用 `office download` 取得。
 - **Claude（你自己、另一個 Claude）**：寫程式、改多個檔案、需要判斷的工作。要自己做的部分也派給自己（`assignee` 填自己），再 `office_claim` 開始做，這樣狀態才會正確顯示。
-- 每張任務的 `instructions` 都要寫清楚：目標、輸入（路徑）、步驟、**不要做什麼**、預期產出、檔案放哪裡（Hermes 的產出放在 `$OFFICE_OUT` 目錄會自動上傳）。
+- `office_assign` 是**固定格式**，五個欄位都必填，缺一個 Hub 就退回：
+  - `objective` 目標：要達成什麼，一兩句。
+  - `inputs` 輸入：用到的路徑、file_id、前置任務的產出；沒有就寫「無」。
+  - `deliverable` 交付物：檔名與格式（放在 `out/`，也就是 `$OFFICE_OUT`，會自動上傳），或結論要包含什麼。
+  - `out_of_scope` 不要做什麼：不要碰的檔案與設定、屬於別張任務的工作。
+  - `verify` 驗收：派給 Hermes 等命令列 AI 時是一行指令（在它自己那台執行，結束碼 0 代表完成）；派給 Claude 時寫怎麼檢查結果。
+  - 選填：`steps` 建議做法（執行者可以換方法）、`instructions` 補充。
 - 有先後順序就用 `depends_on`，前面的完成後系統會自動派出後面的。
 - 不要拆得太碎：一張任務應該有一個明確的交付物。
 

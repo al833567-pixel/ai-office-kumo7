@@ -329,6 +329,30 @@ describe("MCP 入口（官方 SDK 客戶端）", () => {
   });
 });
 
+describe("固定格式派工（office_assign）", () => {
+  test("五個欄位缺一個就退回並列出缺哪些；填齊後組成固定格式交給執行者", async () => {
+    const rpc = async (args: Record<string, unknown>) => (await fetch(`${hub.url}/mcp`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${tok.claude_a}` },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "office_assign", arguments: args } }) })).json() as any;
+    const g = await ok("claude_a", "createGoal", { title: "格式測試" });
+    const base = { goal_id: g.goal_id, assignee: "hermes_a", title: "查空間" };
+    const bad = await rpc({ ...base, instructions: "隨便查一下" });
+    const msg = bad.error?.message ?? bad.result?.content?.[0]?.text ?? "";
+    expect(msg).toContain("目標（objective）");
+    expect(msg).toContain("不要做什麼（out_of_scope）");
+    expect(msg).toContain("驗收（verify）");
+    const part = await rpc({ ...base, objective: "查 C 槽可用空間", inputs: "無", deliverable: "out/free.txt 一行數字", out_of_scope: "不要刪任何檔案" });
+    expect(part.error?.message ?? part.result?.content?.[0]?.text).toContain("驗收（verify）");
+    expect((await ok("claude_a", "getTasks", { goal_id: g.goal_id })).length).toBe(0);
+    const good = await rpc({ ...base, objective: "查 C 槽可用空間", inputs: "無", steps: "可用 df 或 PowerShell", deliverable: "out/free.txt 一行數字（GB）", out_of_scope: "不要刪任何檔案", verify: "findstr /r \"[0-9]\" out\\free.txt" });
+    expect(good.result?.isError, JSON.stringify(good)).toBeFalsy();
+    const t = (await ok("claude_a", "getTasks", { goal_id: g.goal_id }))[0];
+    expect(t.instructions).toBe("【目標】查 C 槽可用空間\n【輸入】無\n【建議做法】可用 df 或 PowerShell（做法不限，結果對就好）\n【交付物】out/free.txt 一行數字（GB）\n【不要做】不要刪任何檔案");
+    expect(t.verify).toBe('findstr /r "[0-9]" out\\free.txt');
+    const card = (await drain("hermes_a")).map((u) => u.message).filter(Boolean).find((m: any) => m.data?.task_id === t.task_id);
+    expect(card.text).toContain("【不要做】不要刪任何檔案");
+  });
+});
+
 describe("UI WebSocket", () => {
   test("連線先收到快照，之後收到即時事件；bot token 不能連", async () => {
     const ws = new WebSocket(`${hub.url.replace("http", "ws")}/ws?token=${encodeURIComponent(tok.boss)}`);

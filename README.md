@@ -30,7 +30,7 @@
 | `claude/` | Claude Code 本機 marketplace：`/office` skill，以及終端機頻道模式用的 `office` 外掛（改寫自官方 Telegram 外掛） |
 | `scripts/windows/`、`scripts/linux/` | 啟動腳本與開機啟動：Windows 工作排程器、Linux／WSL systemd |
 | `docs/平台相容.md` | 各平台（Claude、Hermes、Codex、Antigravity）當櫃台／主管／執行者的接法，Windows／Linux 對照 |
-| `test/` | 72 項自動測試（含真正的 grammY、官方 MCP SDK、外掛端對端、假 Hermes 全流程），Windows 與 Linux 都能跑 |
+| `test/` | 73 項自動測試（含真正的 grammY、官方 MCP SDK、外掛端對端、假 Hermes 全流程），Windows 與 Linux 都能跑 |
 
 目前實測過的環境：兩台 Windows 11，四個 agent（Claude-A、Hermes-A（Windows 原生）、Claude-B、Hermes-B（WSL）），主管用 Claude Code 桌面版，跨機派工、審查、檔案上傳都跑過完整一輪。
 
@@ -164,6 +164,8 @@ powershell -NoProfile -Command "if ((Get-Item out\report.csv).Length -gt 0) { ex
 - 建議在 Windows 的 `%USERPROFILE%\.wslconfig` 設 `networkingMode=mirrored`，WSL 直接共用 Windows 的網路（含 Tailscale）；同一台有 Hub 時也能用 `127.0.0.1` 連。
 - 驗收指令由 `/bin/sh` 執行；Windows 的檔案路徑在 WSL 裡是 `/mnt/c/...`。
 - 開機啟動：WSL 裡用 systemd（`scripts/linux/install-services.sh --node`），或在 Windows 用 `install-tasks.ps1 -WslHermes`。
+
+**Hermes 工作階段清單看得到每個任務**：每個任務跑完後，office-node 會執行 `hermes sessions rename <session_id> 辦公室 #<任務> <標題>`，在 Hermes 的工作階段清單裡就能認出是哪個任務。不想改名就在那個執行者的設定加 `"rename_session": false`；其他執行者要的話設 `true`（指令格式要和 Hermes 一樣）。
 
 **回報只交答案**：Hermes 被要求把給主管的結論寫進任務資料夾的 `answer.md`（沒寫就取輸出最後一段），回報內容就是結論加驗收結果，過程不送出。完整過程存成同一資料夾的 `worker-<時間>.log`；Hermes 的 `session_id` 和過程紀錄位置記在任務上，網頁的任務卡可以複製。
 
@@ -327,7 +329,7 @@ powershell -ExecutionPolicy Bypass -File scripts\windows\install-tasks.ps1 -Node
 | HTTP | MCP | 說明 |
 |---|---|---|
 | `createGoal` | `office_new_goal` | 開目標；Claude 呼叫時自己當主管，其他人可指定 `lead` 或 `auto` |
-| `createTask` | `office_assign` | 主管派工：`assignee`、`title`、`instructions`、`verify`、`depends_on`、`max_attempts` |
+| `createTask` | `office_assign` | 主管派工，固定格式：必填 `objective`（目標）、`inputs`（輸入）、`deliverable`（交付物）、`out_of_scope`（不要做什麼）、`verify`（驗收），缺欄位會被退回；選填 `steps`、`instructions`、`depends_on`、`max_attempts`。Hub 組成「【目標】【輸入】【建議做法】【交付物】【不要做】」交給執行者 |
 | `claimTask` | `office_claim` | 執行者領取（原子操作），開始租約 |
 | `progressTask` | `office_progress` | 回報進度並延長租約 |
 | `reportTask` | `office_report` | `done` / `failed`，附結果與 `files` |
