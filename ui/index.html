@@ -1041,7 +1041,7 @@ function connect() {
 /* ---------- 登入：第一次設定帳密／帳號密碼登入／（備用）token ---------- */
 let loginMode = "login", setupRemote = false;
 function setLoginMode(mode, hint) {
-  loginMode = mode;
+  loginMode = mode; setupRemote = false; $("#lfTokenLabel").textContent = "token";
   const show = (id, on) => { $(id).hidden = !on; };
   show("#lfUser", mode !== "token"); show("#lfPass", mode !== "token"); show("#lfToken", mode === "token");
   show("#lfName", mode === "setup"); show("#lfPass2", mode === "setup");
@@ -1062,8 +1062,10 @@ async function showLogin(err) {
     const st = (await (await fetch("/auth/status")).json()).result;
     if (st.setup_needed && !st.local) {
       // 不在 Hub 那台：要附上 boss 的 token 才能設定（避免別台搶先設定）
-      setLoginMode("setup", "還沒設定帳號密碼。最簡單：到 Hub 那台電腦（A 機）開 http://127.0.0.1:7070 設定。要在這台設定，請在最下面貼上 boss 的 token（在 A 機的 data\\tokens.local.json 裡）。");
+      setLoginMode("setup", "管理者帳號密碼還沒設定，所以還不能用帳密登入。請先到 Hub 那台電腦（A 機）開 http://127.0.0.1:7070/ 設定。也可以在這台設定：最下面貼上 boss 的 token（A 機的 data\\tokens.local.json），或按下方「先用 token 登入」。");
       setupRemote = true; $("#lfToken").hidden = false; $("#lfTokenLabel").textContent = "boss 的 token";
+      $("#loginTitle").textContent = "還沒設定帳號密碼";
+      $("#useToken").hidden = false; $("#useToken").textContent = "先用 token 登入（不設定帳密）";
     }
     else setLoginMode(st.setup_needed ? "setup" : "login");
   } catch { setLoginMode("login"); }
@@ -1100,7 +1102,7 @@ $("#loginForm").addEventListener("submit", async (e) => {
   } catch { $("#loginErr").textContent = "連不到 Hub。"; }
   finally { $("#loginBtn").disabled = false; }
 });
-$("#useToken").addEventListener("click", () => { setLoginMode(loginMode === "token" ? "login" : "token"); $("#loginErr").textContent = ""; });
+$("#useToken").addEventListener("click", () => { if (loginMode === "token") showLogin(); else { setLoginMode("token"); $("#loginErr").textContent = ""; } });
 $("#logout").addEventListener("click", async () => {
   try { await fetch("/auth/logout", { method: "POST", headers: { authorization: `Bearer ${TOKEN}` } }); } catch {}
   try { localStorage.removeItem("office_token"); } catch {}
