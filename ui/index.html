@@ -66,8 +66,17 @@ button,select,input{font:inherit;color:inherit}
 .board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
 @media (max-width:980px){.board{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:540px){.board{grid-template-columns:1fr}}
-.col{padding:8px;display:flex;flex-direction:column;gap:8px;min-width:0;background:var(--panel-2);border:2px solid var(--soft);border-radius:10px}
-.col h3{margin:0 2px;font-family:var(--f-round);font-weight:900;font-size:15px;display:flex;justify-content:space-between}
+.col{padding:8px;display:flex;flex-direction:column;gap:8px;min-width:0;background:var(--panel-2);border:2px solid var(--soft);border-radius:10px;max-height:70vh;overflow-y:auto;overscroll-behavior:contain}
+.col h3{margin:-8px -8px 0;padding:8px 10px 4px;font-family:var(--f-round);font-weight:900;font-size:15px;display:flex;justify-content:space-between;position:sticky;top:-8px;background:var(--panel-2);z-index:1}
+.card details{font-size:12px}
+.card summary{cursor:pointer;color:var(--muted);font-size:12px;list-style:none;user-select:none}
+.card summary::-webkit-details-marker{display:none}
+.card summary::before{content:"▸ "}
+.card details[open] summary::before{content:"▾ "}
+.card details > div{display:flex;flex-direction:column;gap:5px;margin-top:5px}
+.card .brief{font-size:11px;color:var(--muted);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}
+.card .brief.bad{color:#B8473B}
+.col .more{font-size:12px;color:var(--muted);text-align:center;padding:4px}
 .col h3 span{color:var(--muted)}
 .card{background:var(--panel);border:2px solid var(--soft);border-left:6px solid var(--c,var(--soft));border-radius:8px;padding:8px 9px;display:flex;flex-direction:column;gap:5px;min-width:0}
 .card[draggable=true]{cursor:grab}
@@ -783,24 +792,31 @@ function syncBoardData() {
 }
 const COLS = [["todo", "待辦", ["blocked", "todo"]], ["doing", "進行中", ["doing"]], ["done", "完成", ["done"]], ["fail", "失敗", ["failed"]]];
 
+const openCards = new Set();
+document.addEventListener("toggle", (e) => {
+  const d = e.target; if (!(d instanceof HTMLDetailsElement) || !d.dataset.id) return;
+  const id = Number(d.dataset.id); d.open ? openCards.add(id) : openCards.delete(id);
+}, true);
 function renderBoard() {
   syncBoardData();
   const active = hubGoals.filter((g) => g.status === "doing");
   $("#goals").innerHTML = active.length ? active.map((g) => `<span class="goalchip"><b>#${g.goal_id}</b> ${esc(g.title)} <i>主管 ${esc(nameOf(g.lead))}${g.reviewer ? ` · 審查 ${esc(nameOf(g.reviewer))}` : ""}</i></span>`).join("") : `<span class="hint">目前沒有進行中的目標。在上面輸入一個目標開始。</span>`;
-  const b = $("#board"); b.innerHTML = "";
-  const shown = hubTasks.filter((t) => t.status !== "cancelled").sort((a, c) => c.updated_at - a.updated_at);
+  const b = $("#board");
+  const scrolls = [...b.querySelectorAll(".col")].map((c) => c.scrollTop); // 重畫後保留各欄的捲動位置
+  b.innerHTML = "";
+  const shown = hubTasks.filter((t) => t.status !== "cancelled").sort((a, c) => c.updated_at - a.updated_at || c.task_id - a.task_id);
   for (const [key, label, sts] of COLS) {
     const items = shown.filter((t) => sts.includes(t.status));
     const col = document.createElement("div"); col.className = "col";
     col.innerHTML = `<h3>${label}<span>${items.length}</span></h3>`;
-    for (const t of items.slice(0, 30)) {
+    const limit = key === "done" ? 50 : 100;
+    for (const t of items.slice(0, limit)) {
       const c = document.createElement("div"); c.className = "card";
       c.style.setProperty("--c", { todo: "var(--st-queued)", doing: "var(--st-working)", done: "var(--st-done)", fail: "var(--st-error)" }[key]);
       const who = t.assignee ? accounts.find((a) => a.username === t.assignee) : null;
       let meta = `<span class="tag">${iconImg(who?.kind)}${esc(nameOf(t.assignee))}</span><span class="tag">目標 #${t.goal_id}</span>`;
       if (t.status === "blocked") meta += `<span class="tag">等 ${t.depends_on.map((d) => "#" + d).join("、")}</span>`;
       if (t.status === "doing" && t.lease_until) meta += `<span class="mono">租約 ${fmtTime(t.lease_until * 1000)}</span>`;
-      if (t.verify) meta += `<span class="mono">驗收 ${esc(t.verify.slice(0, 40))}</span>`;
       if (t.attempts) meta += `<span class="mono">第 ${t.attempts + 1}/${t.max_attempts} 次</span>`;
       const files = (t.files || []).map((f) => `<a class="tag" href="/file/user${encodeURIComponent(TOKEN)}/${encodeURIComponent(f)}/" target="_blank" rel="noopener">📎 檔案</a>`).join("");
       const res = t.result && (t.status === "done" || t.status === "failed") ? `<div class="${t.status === "failed" ? "err" : "res"}">${esc(t.result.slice(-400))}</div>` : t.note ? `<div class="row">${esc(t.note)}</div>` : "";
@@ -810,10 +826,17 @@ function renderBoard() {
       if (["todo", "doing", "blocked"].includes(t.status)) acts += `<button class="btn sm ghost" type="button" data-act="cancel" data-id="${t.task_id}">中止</button>`;
       if (t.status === "failed" || t.status === "done") acts += `<button class="btn sm ghost" type="button" data-act="retry" data-id="${t.task_id}">重跑</button>`;
       if (t.status !== "done") acts += `<select class="reassign" data-id="${t.task_id}" aria-label="改派 #${t.task_id}"><option value="">改派給…</option>${accounts.filter((a) => a.is_bot && a.username !== t.assignee).map((a) => `<option value="${a.username}">${esc(a.first_name)}</option>`).join("")}</select>`;
-      c.innerHTML = `<div class="row"><span class="id">#${t.task_id}</span><span class="tag st-${t.status}">${({ blocked: "等前置", todo: "待辦", doing: "進行中", done: "完成", failed: "失敗" })[t.status] || t.status}</span>${files}</div><div class="title">${esc(t.title)}</div><div class="row">${meta}</div>${res}${trace}<div class="actions">${acts}</div>`;
+      // 卡片預設收合：只顯示重點；驗收、結果、工作階段、紀錄路徑放在「詳情」裡（展開狀態在重畫時保留）
+      const brief = t.status === "failed" && t.result ? `<div class="brief bad">${esc(t.result.slice(-160))}</div>` : t.status === "doing" && t.note ? `<div class="brief">${esc(t.note)}</div>` : "";
+      const verify = t.verify ? `<div class="mono">驗收 ${esc(t.verify)}</div>` : "";
+      const detail = verify + res + trace + (acts ? `<div class="actions">${acts}</div>` : "");
+      c.innerHTML = `<div class="row"><span class="id">#${t.task_id}</span><span class="tag st-${t.status}">${({ blocked: "等前置", todo: "待辦", doing: "進行中", done: "完成", failed: "失敗" })[t.status] || t.status}</span>${files}</div><div class="title">${esc(t.title)}</div><div class="row">${meta}</div>${brief}`
+        + (detail ? `<details data-id="${t.task_id}"${openCards.has(t.task_id) ? " open" : ""}><summary>詳情</summary><div>${detail}</div></details>` : "");
       col.appendChild(c);
     }
+    if (items.length > limit) { const m = document.createElement("div"); m.className = "more"; m.textContent = `只顯示最近 ${limit} 張（共 ${items.length} 張）`; col.appendChild(m); }
     b.appendChild(col);
+    col.scrollTop = scrolls[b.children.length - 1] ?? 0;
   }
 }
 const nameOf = (u) => accounts.find((a) => a.username === u)?.first_name || u || "—";
