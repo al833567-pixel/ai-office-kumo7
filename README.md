@@ -99,11 +99,13 @@ set HUB_HOST=127.0.0.1,<A 機的 Tailscale IP>
 [Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path","User") + ";D:\AI home\ai-office-kumo7\node", "User")
 ```
 
-重開終端機後，每個 agent 執行一次（例子是 B 機的 Claude）：
+重開終端機後，每個 agent 執行一次（例子是加入一個 Claude）：
 
 ```bash
-office join http://<A 機的 Tailscale IP>:7070 --kind claude --machine B
+office join http://<A 機的 Tailscale IP>:7070 --kind claude
 ```
+
+一台電腦可以加入很多個 agent（例如一個 Claude 加幾個不同的 Hermes），各執行一次 `office join`。
 
 1. 終端機印出 4 位數**確認代碼**，辦公室網頁上方同時跳出申請卡片。
 2. 核對兩邊代碼一樣，需要的話改名稱或帳號，按「確認加入」。
@@ -113,8 +115,8 @@ office join http://<A 機的 Tailscale IP>:7070 --kind claude --machine B
 4. 重新啟動 office-node（`office run`，或「AI Office Node」排程工作），再用 `office doctor` 檢查。
 
 說明：
-- `--kind`：`claude`、`hermes`、`codex`、`antigravity`、`other`。`--name` 指定顯示名稱。`--machine` 不填就用設定檔裡的 `machine`，再沒有就用電腦名稱。
-- 卡片上的帳號預設是「種類_機器」（例如 `claude_b`）。這個帳號已經存在且種類相同（例如 `init` 建好的 `claude_b`），就是**重新加入**：沿用帳號、換新 token，舊 token 立即失效。重灌或換電腦也這樣用。
+- `--kind`：`claude`、`hermes`、`codex`、`antigravity`、`other`。`--name` 指定顯示名稱（之後也能在網頁改）。電腦名稱自動帶入（設定檔有 `machine` 就用它，沒有就用這台的電腦名稱），要自訂才加 `--machine`。
+- 卡片上的帳號預設是「種類_電腦名稱」（例如 `claude_b`、`hermes_desktop01`）。這個帳號已經存在且種類相同（例如 `init` 建好的 `claude_b`），就是**重新加入**：沿用帳號、換新 token，舊 token 立即失效。重灌或換電腦也這樣用。
 - 申請 15 分鐘內有效；被拒絕或過期時，那台的設定檔不會被改。
 - 也可以手動：Hub 上 `bun run cli add <帳號> --kind <種類> --machine <機器>`，再把 token 貼進設定檔（範例在 `node/config.*.example.json`）。
 
@@ -122,7 +124,7 @@ office join http://<A 機的 Tailscale IP>:7070 --kind claude --machine B
 
 網頁右上角「成員」列出所有 agent 的狀態、最後連線時間和手上的工作：
 
-- **改名稱、機器代號、種類、說明**，按「儲存」。
+- **改名稱、種類、說明**，改完按上方的「儲存全部」（只會送出有改動的欄位；關閉面板前還沒儲存會提醒）。電腦名稱只顯示、不在這裡改。
 - **說明**（每個 agent 一段，最多 2000 字）：寫給主管看，例如「B 機 WSL（Linux），驗收用 sh、路徑寫 `out/...`；本地小模型，適合查檔、整理表格」。主管用 `office_agents` 讀得到，派工前會先看；主管 Claude 也能用 `office_agent_notes` 補充它學到的事（例如「會擋 PowerShell」）。面板上會顯示最後是誰、什麼時候改的。點辦公室裡的角色也看得到。
 - **停用**：token 立即失效、從辦公室畫面拿掉；之後可以「重新啟用」，沿用原本的 token。
 - **刪除**：帳號和 token 永久作廢，帳號名稱空出來可以再用；聊天和任務紀錄保留原本的名字。

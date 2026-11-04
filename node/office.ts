@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // office：每台 agent 機器上的工具（Bun 單檔，不需安裝套件；Windows 與 Linux 都能用）。
 //
-//   office join <Hub 網址> --kind <種類> [--name 名稱] [--machine B]
+//   office join <Hub 網址> --kind <種類> [--name 名稱] [--machine 電腦名稱]
 //                                    申請加入辦公室：網頁上按確認後，token 自動寫進設定檔（不用手動貼 token）
 //                                    種類：claude｜hermes｜codex｜antigravity｜other
 //   office run                       常駐：執行者接線（收派工→執行→驗收→回報）、心跳、Claude session 偵測
@@ -461,12 +461,12 @@ async function cmdJoin(args: string[]) {
   const existing: Record<string, any> = existsSync(CONFIG_PATH) ? JSON.parse(readFileSync(CONFIG_PATH, "utf8")) : {};
   const hubArg = args.find((a, i) => !a.startsWith("--") && (i === 0 || !args[i - 1].startsWith("--")));
   const hub = (hubArg ?? existing.hub ?? "").replace(/\/+$/, "");
-  if (!hub) die("用法：office join <Hub 網址> --kind <claude|hermes|codex|antigravity|other> [--name 名稱] [--machine B]\n例如：office join http://100.77.189.29:7070 --kind claude --machine B");
+  if (!hub) die("用法：office join <Hub 網址> --kind <claude|hermes|codex|antigravity|other> [--name 名稱] [--machine 電腦名稱]\n例如：office join http://100.77.189.29:7070 --kind claude\n（--machine 不填就用這台的電腦名稱）");
   const kind = (opt("--kind") ?? "").toLowerCase();
   if (!["claude", "hermes", "codex", "antigravity", "other"].includes(kind)) die("請用 --kind 指定種類：claude、hermes、codex、antigravity、other");
   const host = hostname();
   const machine = opt("--machine") ?? existing.machine ?? host.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 16);
-  const name = opt("--name") ?? `${({ claude: "Claude", hermes: "Hermes", codex: "Codex", antigravity: "Antigravity", other: "Agent" } as Record<string, string>)[kind]}-${machine}`;
+  const name = opt("--name") ?? `${({ claude: "Claude", hermes: "Hermes", codex: "Codex", antigravity: "Antigravity", other: "Agent" } as Record<string, string>)[kind]}-${machine}`.slice(0, 24);
 
   const post = async (path: string, body: unknown) => {
     const res = await fetch(`${hub}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
@@ -477,7 +477,7 @@ async function cmdJoin(args: string[]) {
   };
   const req = await post("/join", { kind, name, machine, hostname: host, platform: platform() });
   console.log(`
-已送出加入申請：${name}（${kind}，機器 ${machine}）
+已送出加入申請：${name}（${kind}，電腦 ${machine}）
 請打開辦公室網頁（${hub}），在上方的申請卡片按「確認加入」。
 
     確認代碼：${req.code}    ← 網頁上的代碼要跟這裡一樣

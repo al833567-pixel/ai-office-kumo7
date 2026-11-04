@@ -165,18 +165,20 @@ a.tag{text-decoration:none}
 .join .acts{margin-left:auto;display:flex;gap:6px}
 .modal{position:fixed;inset:0;z-index:35;background:rgb(60 40 25 / .35);display:grid;place-items:center;padding:16px}
 .modal .panel{width:min(980px,100%);max-height:88vh;overflow:auto;padding:16px 18px}
-.modal .mh{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.modal .mh{display:flex;align-items:center;justify-content:space-between;gap:8px;position:sticky;top:-16px;background:var(--panel);padding:4px 0;z-index:1}
+.modal .mhacts{display:flex;gap:6px;align-items:center}
+.mrow .u small{display:block;font-family:var(--f-round)}
 .modal h2{margin:0;font-family:var(--f-round);font-weight:900}
 .modal h3{margin:14px 0 6px;font-size:14px;color:#7A6455}
 .modal .hint{font-size:12px;color:#7A6455;margin:6px 0 4px}
-.mrow{display:grid;grid-template-columns:28px minmax(120px,1.4fr) minmax(90px,1fr) 70px 120px minmax(110px,1fr) auto;gap:8px;align-items:center;padding:8px 0;border-top:1px dashed var(--soft)}
+.mrow{display:grid;grid-template-columns:28px minmax(120px,1.4fr) minmax(110px,1fr) 120px minmax(110px,1fr) auto;gap:8px;align-items:center;padding:8px 0;border-top:1px dashed var(--soft)}
 .mrow img{width:22px;height:22px}
 .mrow input,.mrow select{width:100%;min-width:0;background:var(--panel-2);border:2px solid var(--soft);border-radius:6px;padding:4px 7px;font-size:13px}
 .mrow .u{font-family:var(--f-mono);font-size:12px;color:#7A6455;overflow:hidden;text-overflow:ellipsis}
 .mrow .st{font-size:12px}
 .mrow .acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .mrow.off{opacity:.65}
-.mrow .mnotes{grid-column:2/7;display:flex;flex-direction:column;gap:2px}
+.mrow .mnotes{grid-column:2/6;display:flex;flex-direction:column;gap:2px}
 .mrow textarea{width:100%;min-width:0;background:var(--panel-2);border:2px solid var(--soft);border-radius:6px;padding:4px 7px;font-size:13px;font-family:inherit;resize:vertical}
 .mrow small{font-size:11px;color:#7A6455}
 .dnotes{white-space:pre-wrap;font-size:13px;line-height:1.5}
@@ -274,7 +276,7 @@ a.tag{text-decoration:none}
 </div>
 <div class="modal" id="members" hidden role="dialog" aria-modal="true" aria-labelledby="membersTitle">
   <div class="card-px panel">
-    <div class="mh"><h2 id="membersTitle">成員管理</h2><button class="btn tiny" type="button" id="membersClose">關閉</button></div>
+    <div class="mh"><h2 id="membersTitle">成員管理</h2><span class="mhacts"><button class="btn sm" type="button" id="membersSave">儲存全部</button><button class="btn tiny" type="button" id="membersClose">關閉</button></span></div>
     <p class="hint">新增：在那台電腦執行 <code>office join &lt;Hub 網址&gt; --kind claude|hermes|codex|antigravity|other</code>，再到上方的申請卡片按確認。</p>
     <div id="memberList"></div>
   </div>
@@ -913,7 +915,7 @@ function renderDrawer() {
   $("#dNotes").innerHTML = s?.notes ? esc(s.notes) + `<br><span class="hint">— @${esc(s.notes_by || "")}</span>` : `<span class="hint">還沒有說明</span>`;
   if (document.activeElement !== $("#renameInput")) $("#renameInput").value = u ? a.name : "";
   $("#dMeta").innerHTML = `<span class="pill" style="--st:${ST_COLOR[a.state]}">${STATES[a.state] || a.state}</span>` + (a.role ? `<span class="role${a.role === "reviewer" ? " rev" : ""}">${a.role === "owner" ? "主管" : "審查"}</span>` : "") +
-    `<span>${a.machine ?? "?"} 機 · ${({ claude: "Claude Code（Anthropic）", hermes: "Hermes（Nous Research）", codex: "Codex CLI（OpenAI）", gemini: "Antigravity CLI（Google）", antigravity: "Antigravity CLI（Google）" })[a.kind] || a.kind || "—"}${a.kind === "claude" && a.sessionUp === false ? " · session 沒在跑" : ""}</span>`;
+    `<span>${a.machine ? `電腦 ${esc(a.machine)} · ` : ""}${({ claude: "Claude Code（Anthropic）", hermes: "Hermes（Nous Research）", codex: "Codex CLI（OpenAI）", gemini: "Antigravity CLI（Google）", antigravity: "Antigravity CLI（Google）" })[a.kind] || a.kind || "—"}${a.kind === "claude" && a.sessionUp === false ? " · session 沒在跑" : ""}</span>`;
   $("#dNow").innerHTML = `<span>${s?.task ? `<b>#${s.task.task_id} ${esc(s.task.title)}</b>` : "沒有進行中的任務"}</span><span class="where">現在位置：${PLACE[a.state] || ""}</span>` +
     (s?.detail ? `<span class="mono">${esc(s.detail)}</span>` : "") + (s?.last_seen ? `<span class="hint">最後連線 ${fmtTime(s.last_seen)}${s.last_activity ? ` · 最後動作 ${fmtTime(s.last_activity)}` : ""}</span>` : "");
   const lines = (agentLog[selected] || []).slice(-120);
@@ -991,7 +993,7 @@ function handleEvent(ev) {
       // 新成員、停用、刪除、改機器或種類：重新分配工位；只改名就直接更新
       if (p.joined || p.changed || !accounts.some((a) => a.id === p.id)) { if (ws && ws.readyState === 1) ws.send("snapshot"); }
       else applyRename(p);
-      if (!$("#members").hidden) renderMembers();
+      if (!$("#members").hidden && !membersDirty()) renderMembers(); // 正在編輯時不重畫，避免蓋掉還沒儲存的內容
       break;
     case "join": {
       const i = joins.findIndex((j) => j.request_id === p.request_id);
@@ -1133,18 +1135,17 @@ async function renderMembers() {
   try { list = await api("getMembers"); } catch (err) { $("#memberList").innerHTML = `<p class="hint">${esc(err.message)}</p>`; return; }
   const row = (m) => {
     const work = [m.open_tasks ? `${m.open_tasks} 個未完成任務` : "", m.leading_goals ? `主管 ${m.leading_goals} 個目標` : ""].filter(Boolean).join("、");
-    if (!m.is_bot) return `<div class="mrow"><span>🙂</span><b>${esc(m.name)}${m.is_me ? "（你）" : ""}</b><span class="u">@${esc(m.username)}</span><span></span><span class="st">真人</span><span></span><span></span></div>`;
-    return `<div class="mrow${m.disabled ? " off" : ""}" data-u="${esc(m.username)}" data-work="${esc(work)}" data-notes="${esc(m.notes || "")}">
+    if (!m.is_bot) return `<div class="mrow"><span>🙂</span><b>${esc(m.name)}${m.is_me ? "（你）" : ""}</b><span class="u">@${esc(m.username)}</span><span></span><span class="st">真人</span><span></span></div>`;
+    return `<div class="mrow${m.disabled ? " off" : ""}" data-u="${esc(m.username)}" data-work="${esc(work)}" data-notes="${esc(m.notes || "")}" data-name="${esc(m.name)}" data-kind="${esc(m.kind)}">
       <img src="/icons/${esc(m.kind)}" alt="${esc(m.kind)}">
       <input class="mn" value="${esc(m.name)}" maxlength="24" aria-label="名稱" ${m.disabled ? "disabled" : ""}>
-      <span class="u" title="帳號">@${esc(m.username)}</span>
-      <input class="mm" value="${esc(m.machine || "")}" maxlength="16" placeholder="機器" aria-label="機器代號" ${m.disabled ? "disabled" : ""}>
+      <span class="u" title="帳號">@${esc(m.username)}${m.machine ? `<small>電腦：${esc(m.machine)}</small>` : ""}</span>
       <select class="mk" aria-label="種類" ${m.disabled ? "disabled" : ""}>${KIND_OPTS.map((k) => `<option value="${k}"${k === m.kind ? " selected" : ""}>${esc(KIND_LABEL[k])}</option>`).join("")}</select>
       <span class="st">${m.disabled ? "已停用" : `${esc(STATES[m.state] || m.state || "")} · ${ago(m.last_seen)}`}${work ? `<br>${esc(work)}` : ""}</span>
       <span class="mnotes"><textarea class="mt" rows="2" maxlength="2000" placeholder="說明（給主管看）：跑在哪台、什麼系統、驗收用哪種指令、模型、適合／不適合做什麼" aria-label="說明" ${m.disabled ? "disabled" : ""}>${esc(m.notes || "")}</textarea>${m.notes_by ? `<small>最後由 @${esc(m.notes_by)} 於 ${new Date(m.notes_at).toLocaleString("zh-TW", { hour12: false })} 更新</small>` : ""}</span>
       <span class="acts">${m.disabled
         ? `<button class="btn sm" type="button" data-act="enable">重新啟用</button><button class="btn sm danger" type="button" data-act="delete">刪除</button>`
-        : `<button class="btn sm" type="button" data-act="save">儲存</button><button class="btn sm ghost" type="button" data-act="disable">停用</button><button class="btn sm danger" type="button" data-act="delete">刪除</button>`}</span>
+        : `<button class="btn sm ghost" type="button" data-act="disable">停用</button><button class="btn sm danger" type="button" data-act="delete">刪除</button>`}</span>
     </div>`;
   };
   const bots = list.filter((m) => m.is_bot && !m.disabled), off = list.filter((m) => m.is_bot && m.disabled), people = list.filter((m) => !m.is_bot);
@@ -1154,9 +1155,10 @@ async function renderMembers() {
 }
 function openMembers() { $("#members").hidden = false; renderMembers(); }
 $("#membersBtn").addEventListener("click", openMembers);
-$("#membersClose").addEventListener("click", () => { $("#members").hidden = true; });
-$("#members").addEventListener("click", (e) => { if (e.target.id === "members") $("#members").hidden = true; });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#members").hidden) $("#members").hidden = true; });
+const closeMembers = () => { if (membersDirty() && !confirm("有還沒儲存的變更，確定關閉？")) return; $("#members").hidden = true; };
+$("#membersClose").addEventListener("click", closeMembers);
+$("#members").addEventListener("click", (e) => { if (e.target.id === "members") closeMembers(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#members").hidden) closeMembers(); });
 $("#memberList").addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-act]"); if (!b) return;
   const r = b.closest(".mrow"), u = r.dataset.u, act = b.dataset.act, work = r.dataset.work;
@@ -1166,13 +1168,7 @@ $("#memberList").addEventListener("click", async (e) => {
   if (act === "delete" && !confirm(`刪除「${nm}」？\n\n帳號與 token 會永久作廢，不能復原（聊天與任務紀錄仍保留）。要再加入請重新執行 office join。${note}`)) return;
   b.disabled = true;
   try {
-    if (act === "save") {
-      await api("updateMember", { username: u, name: nm, machine: r.querySelector(".mm").value.trim(), kind: r.querySelector(".mk").value });
-      const notes = r.querySelector(".mt").value.trim();
-      if (notes !== (r.dataset.notes || "")) await api("setAgentNotes", { username: u, notes });
-      toast(`已更新「${nm}」`, "#5DB585");
-    }
-    else if (act === "enable") { await api("enableMember", { username: u }); toast(`已重新啟用「${nm}」`, "#5DB585"); }
+    if (act === "enable") { await api("enableMember", { username: u }); toast(`已重新啟用「${nm}」`, "#5DB585"); }
     else {
       const res = await api(act === "disable" ? "disableMember" : "deleteMember", { username: u });
       toast(`已${act === "disable" ? "停用" : "刪除"}「${nm}」${res.reassigned ? `，${res.reassigned} 個任務改派給主管` : ""}${res.left ? `；還有 ${res.left} 項要你處理（看板）` : ""}`, act === "disable" ? "#A79C93" : "#E0675A");
@@ -1180,6 +1176,25 @@ $("#memberList").addEventListener("click", async (e) => {
   } catch (err) { toast(String(err.message).replace(/^[A-Za-z ]+:\s*/, ""), "#E0675A"); }
   renderMembers();
 });
+
+// 儲存全部：只送有改動的欄位（名稱、種類、說明）
+async function saveAllMembers() {
+  const btn = $("#membersSave"); btn.disabled = true;
+  let changed = 0, failed = 0;
+  for (const r of document.querySelectorAll("#memberList .mrow[data-u]:not(.off)")) {
+    const u = r.dataset.u, name = r.querySelector(".mn").value.trim(), kind = r.querySelector(".mk").value, notes = r.querySelector(".mt").value.trim();
+    try {
+      if (name !== r.dataset.name || kind !== r.dataset.kind) { await api("updateMember", { username: u, name, kind }); changed++; }
+      if (notes !== (r.dataset.notes || "")) { await api("setAgentNotes", { username: u, notes }); changed++; }
+    } catch (err) { failed++; toast(`${name || u}：${String(err.message).replace(/^[A-Za-z ]+:\s*/, "")}`, "#E0675A"); }
+  }
+  btn.disabled = false;
+  if (!failed) toast(changed ? "已儲存全部變更" : "沒有需要儲存的變更", changed ? "#5DB585" : "#A79C93");
+  renderMembers();
+}
+$("#membersSave").addEventListener("click", saveAllMembers);
+const membersDirty = () => [...document.querySelectorAll("#memberList .mrow[data-u]:not(.off)")].some((r) =>
+  r.querySelector(".mn").value.trim() !== r.dataset.name || r.querySelector(".mk").value !== r.dataset.kind || r.querySelector(".mt").value.trim() !== (r.dataset.notes || ""));
 
 /* ---------- 新 agent 申請加入 ---------- */
 let joins = [];
@@ -1190,7 +1205,7 @@ function renderJoins() {
   box.hidden = !list.length;
   box.innerHTML = list.map((j) => `<div class="join card-px" data-id="${j.request_id}">
     <span class="who">🔔 新成員申請加入：<img src="/icons/${esc(j.kind)}" alt="">${esc(KIND_LABEL[j.kind] || j.kind)}</span>
-    <span class="meta">${j.machine ? `機器 ${esc(j.machine)} · ` : ""}${j.hostname ? `電腦 ${esc(j.hostname)} · ` : ""}${esc(j.platform || "")}${j.ip ? ` · ${esc(j.ip)}` : ""}</span>
+    <span class="meta">${j.machine ? `電腦 ${esc(j.machine)} · ` : ""}${j.hostname && j.hostname !== j.machine ? `（${esc(j.hostname)}）· ` : ""}${esc(j.platform || "")}${j.ip ? ` · ${esc(j.ip)}` : ""}</span>
     <span class="meta">確認代碼 <span class="code">${esc(j.code)}</span>（要跟那台電腦畫面上的一樣）</span>
     <label class="meta">名稱 <input class="jn" value="${esc(j.name)}" maxlength="24"></label>
     <label class="meta">帳號 <input class="ju" value="${esc(j.suggested_username || "")}" maxlength="32" title="填既有的 agent 帳號＝重新加入（換新 token）"></label>${j.existing_account ? `<span class="meta">（沿用既有帳號，舊 token 會失效）</span>` : ""}
