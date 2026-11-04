@@ -15,12 +15,17 @@ description: 把一個目標交給 AI 辦公室團隊：你當主管，拆解成
 
 呼叫 `office_agents`，看誰在線、誰空閒、各在哪台機器（machine A/B）。離線的不要派。
 
+**先讀每個成員的 `notes`（說明）**：使用者或之前的主管會寫它跑在什麼系統、驗收用哪種指令、模型強弱、適合做什麼。說明和下面的通則不一樣時，以說明為準。
+
+說明沒寫它跑在什麼系統時，先問清楚再派有驗收的工作：用 `office_send` 問它，或派一個小任務讓它回報 `uname -a`（Linux）或 `ver`（Windows）。問到或從結果學到新的事（例如「被安全規則擋 PowerShell」「這類工作做得好」），用 `office_agent_notes(username, notes)` 更新說明，保留原本的內容再補上，讓下一個主管知道。
+
 ## 3. 拆任務並派工
 
 先在心裡列出完成目標需要的步驟，再為每一步呼叫 `office_assign`。原則：
 
 - **Hermes 是本地小模型**：只給「單一、具體、可驗證」的工作，例如一個指令、搬檔、排程、查 log、整理成表格。**一定要給 `verify`**：一個結束碼 0 就代表完成的指令。
-  - 用 `office_agents` 看有哪些 Hermes、各在哪台機器（目前 A 機是 Windows 原生版，B 機是 WSL 版）。**每個 Hermes 只碰得到自己那台機器的檔案**：哪台的工作就派給哪台的 Hermes。
+  - 用 `office_agents` 看有哪些 Hermes、各在哪台機器、說明寫它跑在什麼系統（目前 hermes_a 是 A 機 Windows 原生版，hermes_b 是 B 機 WSL／Linux 版）。**每個 Hermes 只碰得到自己那台機器的檔案**：哪台的工作就派給哪台的 Hermes。
+  - **`verify` 在執行者自己那台執行**，語法要配合它的系統：派給 Linux／WSL 的 Hermes 卻寫成 PowerShell，結果正確也會被判失敗（實測發生過）。
   - Windows 原生版：路徑用 Windows 格式（`D:\data\a.csv`），`verify` 由 cmd.exe 執行。
   - WSL／Linux 版：路徑用 Linux 格式（Windows 的 `D:\data` 在 WSL 裡是 `/mnt/d/data`），`verify` 由 `/bin/sh` 執行，寫 shell 指令。
   - **說明要寫「要什麼結果」，不要寫死「用什麼指令」**：Hermes 有自己的安全規則，可能擋下 PowerShell 等指令（A 機實測：它擋掉 PowerShell，改用 `df`／`awk` 拿到一樣的結果）。可以附建議做法，但寫明「做法不限，結果對就好」。真正把關的是 `verify`。

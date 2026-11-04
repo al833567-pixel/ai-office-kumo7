@@ -427,6 +427,20 @@ export const taskMethods: Record<string, (ctx: Ctx, p: Params) => unknown> = {
     return Object.values(agentStates(ctx));
   },
 
+  /** 成員說明：真人（網頁）或 Claude（主管）可寫；給主管派工參考，例如「跑在 B 機 WSL（Linux），驗收用 sh；適合查檔、整理表格」 */
+  setAgentNotes(ctx, p) {
+    const { db, me } = ctx;
+    if (me.is_bot && me.kind !== "claude") throw new ApiError(403, "Forbidden: only humans and Claude agents can edit agent notes");
+    const target = getAccountBy(db, str(p.username)?.replace(/^@/, "") ?? "");
+    if (!target || !target.is_bot || target.disabled) throw new ApiError(400, "Bad Request: username must be an active agent");
+    const notes = (str(p.notes) ?? "").replace(/\r\n/g, "\n").trim();
+    if ([...notes].length > 2000) throw new ApiError(400, "Bad Request: notes must be at most 2000 characters");
+    const t = Date.now();
+    db.query("UPDATE accounts SET notes = ?, notes_by = ?, notes_at = ? WHERE id = ?").run(notes || null, notes ? me.username : null, notes ? t : null, target.id);
+    logEvent(db, "account", me.id, null, { id: target.id, username: target.username, first_name: target.first_name, kind: target.kind, machine: target.machine, is_bot: true, notes: notes || null, notes_by: notes ? me.username : null, notes_at: notes ? t : null });
+    return { username: target.username, notes: notes || null, notes_by: notes ? me.username : null, notes_at: notes ? t : null };
+  },
+
   /** office-node 定期呼叫。
    *  一般：更新自己的在線時間。
    *  session_only=true（Windows 端用 claude_token）：只記錄 Claude session 是否在跑，不更新在線時間。 */
@@ -504,6 +518,7 @@ export function agentStates(ctx: Ctx) {
   const out: Record<string, {
     username: string; name: string; kind: string; machine: string | null; state: AgentState; status: AgentState; detail: string | null;
     task: ReturnType<typeof taskObj> | null; queued: number; last_seen: number | null; last_activity: number | null; session_up: boolean | null; roles: string[];
+    notes: string | null; notes_by: string | null; notes_at: number | null;
   }> = {};
   for (const a of agents) {
     const pr = db.query("SELECT * FROM presence WHERE account_id = ?").get(a.id) as
@@ -531,6 +546,7 @@ export function agentStates(ctx: Ctx) {
       username: a.username, name: a.first_name, kind: a.kind, machine: a.machine, state, status: state, detail: pr?.detail ?? null,
       task: doing ? taskObj(db, doing) : null, queued, last_seen: lastSeen, last_activity: lastAct,
       session_up: pr?.session_up === null || pr?.session_up === undefined ? null : !!pr.session_up, roles,
+      notes: a.notes ?? null, notes_by: a.notes_by ?? null, notes_at: a.notes_at ?? null,
     };
   }
   return out;

@@ -176,8 +176,12 @@ a.tag{text-decoration:none}
 .mrow .st{font-size:12px}
 .mrow .acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .mrow.off{opacity:.65}
+.mrow .mnotes{grid-column:2/7;display:flex;flex-direction:column;gap:2px}
+.mrow textarea{width:100%;min-width:0;background:var(--panel-2);border:2px solid var(--soft);border-radius:6px;padding:4px 7px;font-size:13px;font-family:inherit;resize:vertical}
+.mrow small{font-size:11px;color:#7A6455}
+.dnotes{white-space:pre-wrap;font-size:13px;line-height:1.5}
 .btn.danger{background:#F3C4BC;box-shadow:0 2px 0 #C9867B}
-@media (max-width:760px){.mrow{grid-template-columns:28px 1fr 1fr;}.mrow .u,.mrow .st{grid-column:2/4}.mrow .acts{grid-column:1/4}}
+@media (max-width:760px){.mrow{grid-template-columns:28px 1fr 1fr;}.mrow .u,.mrow .st,.mrow .mnotes{grid-column:2/4}.mrow .acts{grid-column:1/4}}
 .dtasks{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:12px}
 .dtasks li{display:flex;gap:8px}
 .stream .state{color:#F4C77A}
@@ -246,6 +250,7 @@ a.tag{text-decoration:none}
 <aside class="drawer" id="drawer" hidden aria-label="角色詳情">
   <div class="dh"><canvas id="dAvatar" width="24" height="30"></canvas><div><h3 id="dName"></h3><div class="dmeta" id="dMeta"></div></div><button class="x" id="dClose" aria-label="關閉">×</button></div>
   <div class="db">
+    <div class="sec" id="dNotesSec"><h4>說明（給主管看，在右上角「成員」編輯）</h4><div class="dnotes" id="dNotes"></div></div>
     <div class="sec"><h4>顯示名稱（可自訂，最多 24 字）</h4><form class="rename" id="renameForm" autocomplete="off"><input id="renameInput" maxlength="24" aria-label="顯示名稱"><button class="btn sm" type="submit">儲存</button></form></div>
     <div class="sec"><h4>目前狀態</h4><div class="now" id="dNow"></div></div>
     <div class="sec"><h4>動態（hooks、訊息、任務）</h4><div class="stream" id="dStream"></div></div>
@@ -904,6 +909,8 @@ function renderDrawer() {
   for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) av.drawImage(sil, -4 + dx, -12 + dy); av.drawImage(spr, -4, -12);
   $("#dName").innerHTML = (u ? iconImg(a.kind) + " " : "") + esc(a.name) + (u ? "" : "（空位）");
   $("#renameForm").hidden = !u;
+  $("#dNotesSec").hidden = !u;
+  $("#dNotes").innerHTML = s?.notes ? esc(s.notes) + `<br><span class="hint">— @${esc(s.notes_by || "")}</span>` : `<span class="hint">還沒有說明</span>`;
   if (document.activeElement !== $("#renameInput")) $("#renameInput").value = u ? a.name : "";
   $("#dMeta").innerHTML = `<span class="pill" style="--st:${ST_COLOR[a.state]}">${STATES[a.state] || a.state}</span>` + (a.role ? `<span class="role${a.role === "reviewer" ? " rev" : ""}">${a.role === "owner" ? "主管" : "審查"}</span>` : "") +
     `<span>${a.machine ?? "?"} 機 · ${({ claude: "Claude Code（Anthropic）", hermes: "Hermes（Nous Research）", codex: "Codex CLI（OpenAI）", gemini: "Antigravity CLI（Google）", antigravity: "Antigravity CLI（Google）" })[a.kind] || a.kind || "—"}${a.kind === "claude" && a.sessionUp === false ? " · session 沒在跑" : ""}</span>`;
@@ -980,6 +987,7 @@ function handleEvent(ev) {
       renderBoard(); refreshThreads(); break;
     }
     case "account":
+      if (p.notes !== undefined && hubAgents[p.username]) { Object.assign(hubAgents[p.username], { notes: p.notes, notes_by: p.notes_by, notes_at: p.notes_at }); if (selected) renderDrawer(); }
       // 新成員、停用、刪除、改機器或種類：重新分配工位；只改名就直接更新
       if (p.joined || p.changed || !accounts.some((a) => a.id === p.id)) { if (ws && ws.readyState === 1) ws.send("snapshot"); }
       else applyRename(p);
@@ -1126,13 +1134,14 @@ async function renderMembers() {
   const row = (m) => {
     const work = [m.open_tasks ? `${m.open_tasks} 個未完成任務` : "", m.leading_goals ? `主管 ${m.leading_goals} 個目標` : ""].filter(Boolean).join("、");
     if (!m.is_bot) return `<div class="mrow"><span>🙂</span><b>${esc(m.name)}${m.is_me ? "（你）" : ""}</b><span class="u">@${esc(m.username)}</span><span></span><span class="st">真人</span><span></span><span></span></div>`;
-    return `<div class="mrow${m.disabled ? " off" : ""}" data-u="${esc(m.username)}" data-work="${esc(work)}">
+    return `<div class="mrow${m.disabled ? " off" : ""}" data-u="${esc(m.username)}" data-work="${esc(work)}" data-notes="${esc(m.notes || "")}">
       <img src="/icons/${esc(m.kind)}" alt="${esc(m.kind)}">
       <input class="mn" value="${esc(m.name)}" maxlength="24" aria-label="名稱" ${m.disabled ? "disabled" : ""}>
       <span class="u" title="帳號">@${esc(m.username)}</span>
       <input class="mm" value="${esc(m.machine || "")}" maxlength="16" placeholder="機器" aria-label="機器代號" ${m.disabled ? "disabled" : ""}>
       <select class="mk" aria-label="種類" ${m.disabled ? "disabled" : ""}>${KIND_OPTS.map((k) => `<option value="${k}"${k === m.kind ? " selected" : ""}>${esc(KIND_LABEL[k])}</option>`).join("")}</select>
       <span class="st">${m.disabled ? "已停用" : `${esc(STATES[m.state] || m.state || "")} · ${ago(m.last_seen)}`}${work ? `<br>${esc(work)}` : ""}</span>
+      <span class="mnotes"><textarea class="mt" rows="2" maxlength="2000" placeholder="說明（給主管看）：跑在哪台、什麼系統、驗收用哪種指令、模型、適合／不適合做什麼" aria-label="說明" ${m.disabled ? "disabled" : ""}>${esc(m.notes || "")}</textarea>${m.notes_by ? `<small>最後由 @${esc(m.notes_by)} 於 ${new Date(m.notes_at).toLocaleString("zh-TW", { hour12: false })} 更新</small>` : ""}</span>
       <span class="acts">${m.disabled
         ? `<button class="btn sm" type="button" data-act="enable">重新啟用</button><button class="btn sm danger" type="button" data-act="delete">刪除</button>`
         : `<button class="btn sm" type="button" data-act="save">儲存</button><button class="btn sm ghost" type="button" data-act="disable">停用</button><button class="btn sm danger" type="button" data-act="delete">刪除</button>`}</span>
@@ -1157,7 +1166,12 @@ $("#memberList").addEventListener("click", async (e) => {
   if (act === "delete" && !confirm(`刪除「${nm}」？\n\n帳號與 token 會永久作廢，不能復原（聊天與任務紀錄仍保留）。要再加入請重新執行 office join。${note}`)) return;
   b.disabled = true;
   try {
-    if (act === "save") { await api("updateMember", { username: u, name: nm, machine: r.querySelector(".mm").value.trim(), kind: r.querySelector(".mk").value }); toast(`已更新「${nm}」`, "#5DB585"); }
+    if (act === "save") {
+      await api("updateMember", { username: u, name: nm, machine: r.querySelector(".mm").value.trim(), kind: r.querySelector(".mk").value });
+      const notes = r.querySelector(".mt").value.trim();
+      if (notes !== (r.dataset.notes || "")) await api("setAgentNotes", { username: u, notes });
+      toast(`已更新「${nm}」`, "#5DB585");
+    }
     else if (act === "enable") { await api("enableMember", { username: u }); toast(`已重新啟用「${nm}」`, "#5DB585"); }
     else {
       const res = await api(act === "disable" ? "disableMember" : "deleteMember", { username: u });

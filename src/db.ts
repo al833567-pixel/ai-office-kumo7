@@ -203,6 +203,9 @@ export interface Account {
   disabled: number;
   password_hash?: string | null;
   deleted?: number;
+  notes?: string | null;
+  notes_by?: string | null;
+  notes_at?: number | null;
   created_at: number;
 }
 
@@ -241,6 +244,10 @@ export function openDb(path: string): Database {
   if (!cols.includes("machine")) db.exec("ALTER TABLE accounts ADD COLUMN machine TEXT");
   if (!cols.includes("password_hash")) db.exec("ALTER TABLE accounts ADD COLUMN password_hash TEXT");
   if (!cols.includes("deleted")) db.exec("ALTER TABLE accounts ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0");
+  // 成員說明：網頁或主管 Claude 寫，主管用 office_agents 讀
+  if (!cols.includes("notes")) db.exec("ALTER TABLE accounts ADD COLUMN notes TEXT");
+  if (!cols.includes("notes_by")) db.exec("ALTER TABLE accounts ADD COLUMN notes_by TEXT");
+  if (!cols.includes("notes_at")) db.exec("ALTER TABLE accounts ADD COLUMN notes_at INTEGER");
   const mcols = (db.query("PRAGMA table_info(messages)").all() as { name: string }[]).map((c) => c.name);
   if (!mcols.includes("media")) db.exec("ALTER TABLE messages ADD COLUMN media TEXT");
   const tcols = (db.query("PRAGMA table_info(tasks)").all() as { name: string }[]).map((c) => c.name);

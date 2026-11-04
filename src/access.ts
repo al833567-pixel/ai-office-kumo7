@@ -222,6 +222,7 @@ export const accessMethods: Record<string, (ctx: Ctx, p: Json) => unknown> = {
       const leading = (db.query("SELECT COUNT(*) AS n FROM goals WHERE lead_id = ? AND status = 'doing'").get(a.id) as { n: number }).n;
       return { id: a.id, username: a.username, name: a.first_name, kind: a.kind, machine: a.machine, is_bot: !!a.is_bot, disabled: !!a.disabled,
         is_me: a.id === ctx.me.id, state: a.is_bot && !a.disabled ? st?.state ?? "offline" : null, last_seen: st?.last_seen ?? null,
+        notes: a.notes ?? null, notes_by: a.notes_by ?? null, notes_at: a.notes_at ?? null,
         open_tasks: openTasks, leading_goals: leading, created_at: (a as Account & { created_at?: number }).created_at ?? null };
     });
   },

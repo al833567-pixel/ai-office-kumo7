@@ -154,3 +154,36 @@ describe("成員管理", () => {
     expect((await userCall(bossToken, "approveJoin", { request_id: again.result.request_id })).result).toMatchObject({ username: "hermes_c", rejoined: false });
   });
 });
+
+describe("成員說明", () => {
+  test("網頁和主管 Claude 都能寫；Hermes 不能；主管用 getAgents／MCP 讀得到；成員清單也看得到", async () => {
+    const mk = async (kind: string, machine: string) => {
+      const j = await post("/join", { kind, machine });
+      const wp = post("/join/wait", { request_id: j.result.request_id, secret: j.result.secret, timeout: 10 });
+      await userCall(bossToken, "approveJoin", { request_id: j.result.request_id });
+      return (await wp).result.token as string;
+    };
+    const lead = await mk("claude", "N");
+    const herm = await mk("hermes", "N");
+    const bot = (t: string, m: string, p: unknown = {}) => post(`/bot${t}/${m}`, p);
+
+    expect((await userCall(bossToken, "setAgentNotes", { username: "hermes_n", notes: "B 機 WSL（Linux），驗收用 sh" })).result).toMatchObject({ notes_by: "kumo" });
+    const r = await bot(lead, "setAgentNotes", { username: "hermes_n", notes: "B 機 WSL（Linux），驗收用 sh\n會擋 PowerShell" });
+    expect(r.result).toMatchObject({ notes_by: "claude_n" });
+    expect((await bot(herm, "setAgentNotes", { username: "hermes_n", notes: "我很強" })).ok).toBe(false);
+    expect((await userCall(bossToken, "setAgentNotes", { username: "kumo", notes: "x" })).ok).toBe(false);
+
+    const ag = (await bot(lead, "getAgents")).result.find((a: any) => a.username === "hermes_n");
+    expect(ag).toMatchObject({ notes: "B 機 WSL（Linux），驗收用 sh\n會擋 PowerShell", notes_by: "claude_n" });
+    const mem = (await userCall(bossToken, "getMembers")).result.find((m: any) => m.username === "hermes_n");
+    expect(mem.notes).toContain("會擋 PowerShell");
+
+    // MCP：office_agent_notes 寫、office_agents 讀
+    const rpc = async (method: string, params: unknown) => (await fetch(`${hub.url}/mcp`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${lead}` }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) })).json() as Promise<any>;
+    await rpc("tools/call", { name: "office_agent_notes", arguments: { username: "hermes_n", notes: "清空前的最後一版" } });
+    const listed = JSON.parse((await rpc("tools/call", { name: "office_agents", arguments: {} })).result.content[0].text);
+    expect(listed.find((a: any) => a.username === "hermes_n").notes).toBe("清空前的最後一版");
+    // 空字串清除
+    expect((await bot(lead, "setAgentNotes", { username: "hermes_n", notes: "" })).result).toMatchObject({ notes: null, notes_by: null });
+  });
+});

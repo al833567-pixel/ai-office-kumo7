@@ -30,7 +30,7 @@
 | `claude/` | Claude Code 本機 marketplace：`/office` skill，以及終端機頻道模式用的 `office` 外掛（改寫自官方 Telegram 外掛） |
 | `scripts/windows/`、`scripts/linux/` | 啟動腳本與開機啟動：Windows 工作排程器、Linux／WSL systemd |
 | `docs/平台相容.md` | 各平台（Claude、Hermes、Codex、Antigravity）當櫃台／主管／執行者的接法，Windows／Linux 對照 |
-| `test/` | 71 項自動測試（含真正的 grammY、官方 MCP SDK、外掛端對端、假 Hermes 全流程），Windows 與 Linux 都能跑 |
+| `test/` | 72 項自動測試（含真正的 grammY、官方 MCP SDK、外掛端對端、假 Hermes 全流程），Windows 與 Linux 都能跑 |
 
 目前實測過的環境：兩台 Windows 11，四個 agent（Claude-A、Hermes-A（Windows 原生）、Claude-B、Hermes-B（WSL）），主管用 Claude Code 桌面版，跨機派工、審查、檔案上傳都跑過完整一輪。
 
@@ -122,7 +122,8 @@ office join http://<A 機的 Tailscale IP>:7070 --kind claude --machine B
 
 網頁右上角「成員」列出所有 agent 的狀態、最後連線時間和手上的工作：
 
-- **改名稱、機器代號、種類**，按「儲存」。
+- **改名稱、機器代號、種類、說明**，按「儲存」。
+- **說明**（每個 agent 一段，最多 2000 字）：寫給主管看，例如「B 機 WSL（Linux），驗收用 sh、路徑寫 `out/...`；本地小模型，適合查檔、整理表格」。主管用 `office_agents` 讀得到，派工前會先看；主管 Claude 也能用 `office_agent_notes` 補充它學到的事（例如「會擋 PowerShell」）。面板上會顯示最後是誰、什麼時候改的。點辦公室裡的角色也看得到。
 - **停用**：token 立即失效、從辦公室畫面拿掉；之後可以「重新啟用」，沿用原本的 token。
 - **刪除**：帳號和 token 永久作廢，帳號名稱空出來可以再用；聊天和任務紀錄保留原本的名字。
 
@@ -331,7 +332,8 @@ powershell -ExecutionPolicy Bypass -File scripts\windows\install-tasks.ps1 -Node
 | `reviewTask` | `office_review` | 主管或審查者 `approve` / `reject` |
 | `reassignTask` / `retryTask` / `cancelTask` | `office_reassign` / `office_retry` / `office_cancel` | 主管或真人 |
 | `completeGoal` | `office_complete_goal` | 結束目標並附總結 |
-| `getGoals` / `getTasks` / `getAgents` | `office_goals` / `office_tasks` / `office_agents` | 查詢 |
+| `getGoals` / `getTasks` / `getAgents` | `office_goals` / `office_tasks` / `office_agents` | 查詢；`getAgents` 含每個成員的說明 |
+| `setAgentNotes` | `office_agent_notes` | 寫成員說明（真人或 Claude；Hermes 等執行者不能改） |
 | `waitEvents` | `office_wait` | 等跟自己有關的消息（最多 110 秒），可指定目標，結案時回傳總結；桌面版主管與櫃台用 |
 | `uploadFile` | — | 只上傳不發訊息 |
 | `pressButton` | — | 真人按 bot 訊息上的按鈕（網頁批准權限用） |
