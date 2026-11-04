@@ -83,7 +83,11 @@ function postAs(ctx: Ctx, who: Account, text: string, o: { threadId: number; dat
   return postMessage({ ...ctx, me: who }, OFFICE, { text, threadId: o.threadId, data: o.data, replyMarkup: o.replyMarkup, internal: true });
 }
 
-function dispatch(ctx: Ctx, t: TaskRow, prefix = "📋 任務") {
+/** 重新派出時附帶的原因：退回說明全文、上次的結果（含驗收失敗輸出）尾段 */
+interface DispatchExtra { reason?: "retry" | "reject" | "reassign" | "rerun"; review_note?: string | null; prev_result?: string | null }
+const prevTail = (s: string | null | undefined) => (s ? (s.length > 1500 ? "…" + s.slice(-1500) : s) : null);
+
+function dispatch(ctx: Ctx, t: TaskRow, prefix = "📋 任務", extra: DispatchExtra = {}) {
   const db = ctx.db;
   const g = getGoal(db, t.goal_id)!;
   const lead = acc(db, g.lead_id)!;
@@ -92,6 +96,8 @@ function dispatch(ctx: Ctx, t: TaskRow, prefix = "📋 任務") {
   const lines = [
     `${at(assignee)} ${prefix} #${t.id}：${t.title}`,
     "",
+    ...(extra.review_note ? ["↩️ 退回說明（請先照這些修正）：", extra.review_note, ""] : []),
+    ...(extra.prev_result ? ["上次的結果／失敗原因（尾段）：", extra.prev_result, ""] : []),
     t.instructions,
     ...(t.verify ? ["", `驗收指令：${t.verify}`] : []),
     ...(deps.length ? [`前置任務：${deps.map((d) => "#" + d).join("、")}（已完成）`] : []),
@@ -104,10 +110,32 @@ function dispatch(ctx: Ctx, t: TaskRow, prefix = "📋 任務") {
   if (sender) {
     postAs(ctx, sender, lines.join("\n"), {
       threadId: g.id,
-      data: { type: "task", task_id: t.id, goal_id: g.id, title: t.title, instructions: t.instructions, verify: t.verify, lead: lead.username, attempt: t.attempts + 1 },
+      data: { type: "task", task_id: t.id, goal_id: g.id, title: t.title, instructions: t.instructions, verify: t.verify, lead: lead.username, attempt: t.attempts + 1,
+        ...(extra.reason ? { reason: extra.reason } : {}), ...(extra.review_note ? { review_note: extra.review_note } : {}), ...(extra.prev_result ? { prev_result: extra.prev_result } : {}) },
     });
   }
   logEvent(db, "task_dispatch", ctx.me.id, null, taskObj(db, t));
+}
+
+/** 次數用完（失敗或被退回太多次）：執行者改派給在線的審查者 Claude，否則主管；Claude 就標成失敗通知主管 */
+function exhausted(ctx: Ctx, t: TaskRow, g: GoalRow, assignee: Account, attempts: number, lastError: string, extra: DispatchExtra) {
+  const db = ctx.db;
+  const lead = acc(db, g.lead_id)!;
+  if (assignee.kind !== "claude") {
+    const states = agentStates(ctx);
+    const reviewer = acc(db, g.reviewer_id);
+    const helper = reviewer && reviewer.id !== assignee.id && states[reviewer.username]?.state !== "offline" ? reviewer : lead;
+    setTask(ctx, t, { status: "todo", attempts: 0, assignee_id: helper.id, lease_until: null, note: `由 ${assignee.username} 改派（${attempts} 次未通過）` });
+    postMessage(ctx, OFFICE, { text: `${at(lead)} ⚠️ #${t.id} 在 ${assignee.first_name} ${attempts} 次未通過，已自動改派給 ${helper.first_name}。\n最後原因：${lastError.slice(0, 500)}`, threadId: g.id, internal: true,
+      data: { type: "report", task_id: t.id, goal_id: g.id, status: "reassigned", to: helper.username } });
+    dispatch(ctx, t, "🆘 改派任務", { ...extra, reason: "reassign" });
+  } else {
+    setTask(ctx, t, { status: "failed", attempts, lease_until: null });
+    postMessage(ctx, OFFICE, {
+      text: `${at(lead)} ❌ 任務 #${t.id} 失敗（${attempts}/${t.max_attempts}）：${t.title}\n\n${lastError || "（沒有附原因）"}\n\n可以用 office_reassign 改派或 office_retry 重試。`,
+      threadId: g.id, internal: true, data: { type: "report", task_id: t.id, goal_id: g.id, status: "failed" },
+    });
+  }
 }
 
 function unblockDependents(ctx: Ctx, goalId: number) {
@@ -188,7 +216,8 @@ export const taskMethods: Record<string, (ctx: Ctx, p: Params) => unknown> = {
       if (missing.length) {
         throw new ApiError(400, `Bad Request: office_assign 缺少必填欄位：${missing.map(([k, zh]) => `${zh}（${k}）`).join("、")}。`
           + "每張派工都要寫：objective 要達成什麼、inputs 用到哪些輸入（路徑、file_id、前置任務的產出；沒有就寫「無」）、"
-          + "deliverable 交付什麼（檔名、格式、放在 out/，或結論要包含什麼）、out_of_scope 不要做什麼、verify 驗收方式（執行者是 Hermes 等命令列 AI 時是一行指令，結束碼 0 代表完成）。");
+          + "deliverable 交付什麼（檔名、格式、放在 out/，或結論要包含什麼）、out_of_scope 不要做什麼、verify 驗收方式（執行者是 Hermes 等命令列 AI 時是一行指令，結束碼 0 代表完成）。"
+          + "如果你的 office_assign 工具定義裡沒有這些欄位，是這個 session 還在用 Hub 更新前的舊工具清單：照上面補上欄位重送即可，或請使用者重開 Claude Code session。");
       }
       const f = (k: string) => str(p[k])!.trim();
       instructions = [
@@ -274,22 +303,10 @@ export const taskMethods: Record<string, (ctx: Ctx, p: Params) => unknown> = {
       const attempts = t.attempts + 1;
       if (attempts < t.max_attempts) {
         setTask(ctx, t, { status: "todo", attempts, result, lease_until: null, note: "失敗，自動重試" });
-        dispatch(ctx, t, `🔁 重試任務（上次失敗：${result.slice(0, 200) || "未說明原因"}）`);
-      } else if (me.kind !== "claude") {
-        // 執行者（Hermes、Codex、Antigravity…）用完重試次數：改派給審查者 Claude；審查者不在線（或沒有審查者）就改派給主管
-        const states = agentStates(ctx);
-        const reviewer = acc(db, g.reviewer_id);
-        const helper = reviewer && reviewer.id !== me.id && states[reviewer.username]?.state !== "offline" ? reviewer : lead;
-        setTask(ctx, t, { status: "todo", attempts: 0, assignee_id: helper.id, result, lease_until: null, note: `由 ${me.username} 改派（失敗 ${attempts} 次）` });
-        postMessage(ctx, OFFICE, { text: `${at(lead)} ⚠️ #${t.id} 在 ${me.first_name} 失敗 ${attempts} 次，已自動改派給 ${helper.first_name}。\n最後錯誤：${result.slice(0, 500)}`, threadId: g.id, internal: true,
-          data: { type: "report", task_id: t.id, goal_id: g.id, status: "reassigned", to: helper.username } });
-        dispatch(ctx, t, "🆘 改派任務");
+        dispatch(ctx, t, "🔁 重試任務", { reason: "retry", prev_result: prevTail(result) });
       } else {
-        setTask(ctx, t, { status: "failed", attempts, result, lease_until: null });
-        postMessage(ctx, OFFICE, {
-          text: `${at(lead)} ❌ 任務 #${t.id} 失敗（${attempts}/${t.max_attempts}）：${t.title}\n\n${result || "（沒有附原因）"}\n\n可以用 office_reassign 改派或 office_retry 重試。`,
-          threadId: g.id, internal: true, data: { type: "report", task_id: t.id, goal_id: g.id, status: "failed" },
-        });
+        setTask(ctx, t, { result, attempts });
+        exhausted(ctx, t, g, me, attempts, result, { prev_result: prevTail(result) });
       }
     }
     return taskObj(db, getTask(db, t.id)!);
@@ -307,8 +324,18 @@ export const taskMethods: Record<string, (ctx: Ctx, p: Params) => unknown> = {
       setTask(ctx, t, { note: `審查通過：${comment}`.slice(0, 500) }, "task_review");
       if (me.id !== g.lead_id) postMessage(ctx, OFFICE, { text: `${at(acc(db, g.lead_id))} 👀 #${t.id} 審查通過${comment ? "：" + comment : ""}`, threadId: g.id, internal: true, data: { type: "review", task_id: t.id, verdict } });
     } else {
-      setTask(ctx, t, { status: "todo", lease_until: null, note: `審查退回：${comment}`.slice(0, 500) }, "task_review");
-      dispatch(ctx, t, `↩️ 審查退回（${comment.slice(0, 300) || "請修正"}）`);
+      // 退回也算一次：超過次數就照失敗流程改派或通知主管，避免無限退回
+      const note = comment || "請修正";
+      const attempts = t.attempts + 1;
+      const assignee = acc(db, t.assignee_id)!;
+      const extra: DispatchExtra = { reason: "reject", review_note: note, prev_result: prevTail(t.result) };
+      if (attempts < t.max_attempts) {
+        setTask(ctx, t, { status: "todo", attempts, lease_until: null, note: `審查退回：${note}`.slice(0, 500) }, "task_review");
+        dispatch(ctx, t, "↩️ 審查退回", extra);
+      } else {
+        setTask(ctx, t, { attempts, note: `審查退回：${note}`.slice(0, 500) }, "task_review");
+        exhausted(ctx, t, g, assignee, attempts, `審查退回：${note}`, extra);
+      }
     }
     return taskObj(db, getTask(db, t.id)!);
   },
@@ -322,7 +349,7 @@ export const taskMethods: Record<string, (ctx: Ctx, p: Params) => unknown> = {
     const deps = JSON.parse(t.depends_on) as number[];
     const ready = deps.every((d) => getTask(db, d)?.status === "done");
     setTask(ctx, t, { assignee_id: to.id, status: ready ? "todo" : "blocked", attempts: 0, lease_until: null, note: `改派給 ${to.username}` });
-    if (ready) dispatch(ctx, t, "🔀 改派任務");
+    if (ready) dispatch(ctx, t, "🔀 改派任務", { reason: "reassign", prev_result: prevTail(t.result) });
     return taskObj(db, t);
   },
 
@@ -332,7 +359,7 @@ export const taskMethods: Record<string, (ctx: Ctx, p: Params) => unknown> = {
     const g = getGoal(db, t.goal_id)!;
     if (!isLeadOrHuman(me, g)) throw new ApiError(403, "Forbidden: only the lead or a human can retry");
     setTask(ctx, t, { status: "todo", attempts: 0, lease_until: null, note: "重新執行" });
-    dispatch(ctx, t, "🔁 重新執行任務");
+    dispatch(ctx, t, "🔁 重新執行任務", { reason: "rerun", prev_result: prevTail(t.result) });
     return taskObj(db, t);
   },
 
@@ -432,8 +459,10 @@ export const taskMethods: Record<string, (ctx: Ctx, p: Params) => unknown> = {
     const goal = goalState();
     // 只回傳跟我有關的：私訊、@我、我開的目標底下的訊息
     const myGoals = new Set((db.query("SELECT id FROM goals WHERE created_by = ? OR lead_id = ?").all(me.id, me.id) as { id: number }[]).map((r) => r.id));
+    // 編輯過的訊息（執行者每 30 秒更新的「執行中（N 分鐘）」進度）不回傳：它們帶著舊日期一直重送，會淹沒真正的回報。
+    // 其他目標的新訊息照常回傳（同一個主管可能同時帶好幾個目標；這裡丟掉的話佇列已前進，之後就收不到了）。
     const mine = got.filter((u) => {
-      const m = u.message ?? u.edited_message;
+      const m = u.message;
       if (!m) return false;
       if (m.chat?.type === "private") return true;
       if ((m.text ?? m.caption ?? "").includes(`@${me.username}`)) return true;

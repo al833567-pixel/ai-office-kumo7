@@ -30,7 +30,7 @@
 | `claude/` | Claude Code 本機 marketplace：`/office` skill，以及終端機頻道模式用的 `office` 外掛（改寫自官方 Telegram 外掛） |
 | `scripts/windows/`、`scripts/linux/` | 啟動腳本與開機啟動：Windows 工作排程器、Linux／WSL systemd |
 | `docs/平台相容.md` | 各平台（Claude、Hermes、Codex、Antigravity）當櫃台／主管／執行者的接法，Windows／Linux 對照 |
-| `test/` | 73 項自動測試（含真正的 grammY、官方 MCP SDK、外掛端對端、假 Hermes 全流程），Windows 與 Linux 都能跑 |
+| `test/` | 76 項自動測試（含真正的 grammY、官方 MCP SDK、外掛端對端、假 Hermes 全流程），Windows 與 Linux 都能跑 |
 
 目前實測過的環境：兩台 Windows 11，四個 agent（Claude-A、Hermes-A（Windows 原生）、Claude-B、Hermes-B（WSL）），主管用 Claude Code 桌面版，跨機派工、審查、檔案上傳都跑過完整一輪。
 
@@ -293,7 +293,8 @@ powershell -ExecutionPolicy Bypass -File scripts\windows\install-tasks.ps1 -Node
 - 任務有租約（預設 15 分鐘），執行者要定期回報進度；過期自動退回待辦並通知主管。office-node 執行中每 30 秒自動回報。
 - Hermes 等執行者失敗會自動重試（預設 2 次）；用完次數就改派給在線的審查者 Claude，審查者不在線就改派給主管。
 - `depends_on` 的任務在前置任務完成後才會派出。
-- 主管或審查者可以退回（`office_review`），任務會重新派給原執行者。
+- 主管或審查者可以退回（`office_review`），任務會重新派給原執行者；退回也算一次，用完次數就照失敗流程改派。
+- 重新派出時（自動重試、退回、改派、重跑），執行者會收到原因：退回說明全文、上次的結果或驗收失敗輸出。office-node 會把上次的 `out/` 改名成 `out.prev-<次數>`、建立空的 `out/`，提示詞會說明舊檔只能參考；驗收和上傳只看新的 `out/`，舊檔不會讓驗收矇混過關。
 - 同一串對話 bot 之間來回超過上限會暫停，等你在網頁發言。
 
 ### 檔案
@@ -338,7 +339,7 @@ powershell -ExecutionPolicy Bypass -File scripts\windows\install-tasks.ps1 -Node
 | `completeGoal` | `office_complete_goal` | 結束目標並附總結 |
 | `getGoals` / `getTasks` / `getAgents` | `office_goals` / `office_tasks` / `office_agents` | 查詢；`getAgents` 含每個成員的說明 |
 | `setAgentNotes` | `office_agent_notes` | 寫成員說明（真人或 Claude；Hermes 等執行者不能改） |
-| `waitEvents` | `office_wait` | 等跟自己有關的消息（最多 110 秒），可指定目標，結案時回傳總結；桌面版主管與櫃台用 |
+| `waitEvents` | `office_wait` | 等跟自己有關的消息（最多 110 秒），可指定目標，結案時回傳總結；不回傳編輯過的進度訊息；桌面版主管與櫃台用 |
 | `uploadFile` | — | 只上傳不發訊息 |
 | `pressButton` | — | 真人按 bot 訊息上的按鈕（網頁批准權限用） |
 | `heartbeat` | — | office-node 心跳 |

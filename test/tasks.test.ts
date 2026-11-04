@@ -329,6 +329,44 @@ describe("MCP 入口（官方 SDK 客戶端）", () => {
   });
 });
 
+describe("重新派出時帶原因", () => {
+  test("退回：派工訊息的 data 含退回說明全文；自動重試：含上次的失敗原因；退回也計次，用完就改派", async () => {
+    const g = await ok("claude_a", "createGoal", { title: "帶原因" });
+    const t = await ok("claude_a", "createTask", { goal_id: g.goal_id, assignee: "hermes_a", title: "x", instructions: "x", max_attempts: 3 });
+    await drain("hermes_a");
+    await ok("hermes_a", "claimTask", { task_id: t.task_id });
+    await ok("hermes_a", "reportTask", { task_id: t.task_id, status: "failed", result: "驗收失敗（結束碼 1）：找不到 out/a.csv" });
+    let card = (await drain("hermes_a")).map((u) => u.message).filter(Boolean).find((m: any) => m.data?.task_id === t.task_id);
+    expect(card.data).toMatchObject({ reason: "retry", attempt: 2 });
+    expect(card.data.prev_result).toContain("找不到 out/a.csv");
+    expect(card.text).toContain("找不到 out/a.csv");
+    await ok("hermes_a", "claimTask", { task_id: t.task_id });
+    await ok("hermes_a", "reportTask", { task_id: t.task_id, status: "done", result: "好了" });
+    const note = "第 3 行改成 42。\n" + "很長的說明".repeat(200);
+    expect(await ok("claude_a", "reviewTask", { task_id: t.task_id, verdict: "reject", comment: note })).toMatchObject({ status: "todo", attempts: 2 });
+    card = (await drain("hermes_a")).map((u) => u.message).filter(Boolean).find((m: any) => m.data?.task_id === t.task_id);
+    expect(card.data).toMatchObject({ reason: "reject", review_note: note, prev_result: "好了", attempt: 3 });
+    // 第 3 次又被退回：用完次數 → 改派（審查者不在線就給主管）
+    await ok("hermes_a", "claimTask", { task_id: t.task_id });
+    await ok("hermes_a", "reportTask", { task_id: t.task_id, status: "done", result: "還是一樣" });
+    const r = await ok("claude_a", "reviewTask", { task_id: t.task_id, verdict: "reject", comment: "沒改" });
+    expect(r.assignee).not.toBe("hermes_a");
+    expect(r).toMatchObject({ status: "todo", attempts: 0 });
+  });
+
+  test("office_wait 不回傳編輯過的進度訊息", async () => {
+    const g = await ok("claude_a", "createGoal", { title: "等待過濾" });
+    await ok("claude_a", "waitEvents", { timeout: 0 });
+    const m = await ok("hermes_a", "sendMessage", { chat_id: OFFICE_GROUP_ID, message_thread_id: g.goal_id, text: "▶️ 執行中（1 分鐘）" });
+    await ok("hermes_a", "editMessageText", { chat_id: OFFICE_GROUP_ID, message_id: m.message_id, text: "▶️ 執行中（2 分鐘）" });
+    await ok("hermes_a", "editMessageText", { chat_id: OFFICE_GROUP_ID, message_id: m.message_id, text: "▶️ 執行中（3 分鐘）" });
+    const w = await ok("claude_a", "waitEvents", { goal_id: g.goal_id, timeout: 1 });
+    const texts = w.messages.map((x: any) => x.text);
+    expect(texts).toContain("▶️ 執行中（1 分鐘）");
+    expect(texts.some((x: string) => x.includes("2 分鐘") || x.includes("3 分鐘"))).toBe(false);
+  });
+});
+
 describe("固定格式派工（office_assign）", () => {
   test("五個欄位缺一個就退回並列出缺哪些；填齊後組成固定格式交給執行者", async () => {
     const rpc = async (args: Record<string, unknown>) => (await fetch(`${hub.url}/mcp`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${tok.claude_a}` },

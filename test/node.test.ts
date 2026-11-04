@@ -57,7 +57,10 @@ if (args[0] === "sessions") { require("fs").appendFileSync(require("path").join(
 const qi = args.indexOf("--query-file");
 const prompt = qi >= 0 ? require("fs").readFileSync(args[qi + 1], "utf8") : (args.at(-1) ?? "");
 console.log(qi >= 0 ? "收到任務（檔案），開始處理" : "收到任務，開始處理");
+require("fs").appendFileSync("prompts.log", prompt + "\\n=====\\n"); // 每次收到的提示詞記在任務資料夾，給測試檢查
 if (prompt.includes("FAIL")) { console.error("做不到"); process.exit(3); }
+// SKIP_ON_RETRY：重做時什麼都不寫（模擬照舊、沒有修改），用來確認舊的輸出不會讓驗收通過
+if (prompt.includes("SKIP_ON_RETRY") && prompt.includes("次執行")) { console.log("這次什麼都沒做"); process.exit(0); }
 if (process.env.OFFICE_OUT) require("fs").writeFileSync(require("path").join(process.env.OFFICE_OUT, "report.txt"), "報表內容\\n");
 // 模仿 Hermes 的終端機輸出：顏色碼、框線、session_id
 console.log("\\x1b[2m╭──────────╮\\x1b[0m");
@@ -312,4 +315,28 @@ describe("office join", () => {
     expect(await p.exited).not.toBe(0);
     expect(JSON.parse(readFileSync(cfgJoin, "utf8"))).toEqual({ hub: hub.url });
   });
+});
+
+describe("退回與重試", () => {
+  test("退回說明與失敗原因進到 worker 的提示詞；重做時舊輸出移到 out.prev-N，舊檔不會讓驗收通過；退回也計次", async () => {
+    const g = await ok("claude_b", "createGoal", { title: "退回測試" });
+    const t = await ok("claude_b", "createTask", { goal_id: g.goal_id, assignee: "hermes_b", title: "寫報表（會被退回）", instructions: "在輸出目錄寫 report.txt SKIP_ON_RETRY", verify: `"${BUN}" "${checkScript}"`, max_attempts: 3 });
+    expect((await waitTask(t.task_id, ["done", "failed"])).status).toBe("done");
+    // 第 1 次：主管退回（計為第 2 次）
+    const r = await ok("claude_b", "reviewTask", { task_id: t.task_id, verdict: "reject", comment: "第 3 行的數值改成 42，欄位名稱改成 value" });
+    expect(r).toMatchObject({ status: "todo", attempts: 1 });
+    // 第 2 次什麼都沒寫 → 驗收失敗 → 自動重試（第 3 次）→ 又失敗 → 用完次數改派給主管
+    await waitReassigned(t.task_id, 30000);
+    const taskDir = join(dir, "work", `task-${t.task_id}`);
+    expect(readFileSync(join(taskDir, "out.prev-1", "report.txt"), "utf8")).toContain("報表內容"); // 第 1 次的舊輸出保留在這裡
+    expect(readdirSync(join(taskDir, "out"))).toEqual([]);                                          // 最後一次的 out/ 是空的
+    const prompts = readFileSync(join(taskDir, "prompts.log"), "utf8").split("\n=====\n").filter(Boolean);
+    expect(prompts.length).toBe(3);
+    expect(prompts[0]).not.toContain("次執行");
+    expect(prompts[1]).toContain("第 2 次執行，上次的結果被主管退回");
+    expect(prompts[1]).toContain("第 3 行的數值改成 42，欄位名稱改成 value");
+    expect(prompts[1]).toContain("out.prev-1");
+    expect(prompts[2]).toContain("第 3 次執行，上次沒有通過");
+    expect(prompts[2]).toContain("驗收失敗");
+  }, 45000);
 });

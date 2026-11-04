@@ -21,7 +21,7 @@
 //
 // 設定檔：~/.office/config.json（或環境變數 OFFICE_CONFIG 指定路徑）。
 // 指令用哪個帳號：環境變數 OFFICE_AS（claude｜帳號名稱｜hermes），沒設就用 claude_token。
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, chmodSync, copyFileSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, chmodSync, copyFileSync, unlinkSync, renameSync } from "node:fs";
 import { homedir, hostname, platform } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -568,7 +568,10 @@ async function cmdJoin(args: string[]) {
 }
 
 // ---------------- 常駐：執行者接線 ----------------
-interface TaskData { type: "task"; task_id: number; goal_id: number; title: string; instructions: string; verify?: string | null; lead: string; attempt?: number }
+interface TaskData {
+  type: "task"; task_id: number; goal_id: number; title: string; instructions: string; verify?: string | null; lead: string; attempt?: number;
+  reason?: "retry" | "reject" | "reassign" | "rerun"; review_note?: string; prev_result?: string;   // 重新派出時：原因、退回說明、上次結果尾段
+}
 
 async function runWorker(cfg: Config, w: WorkerConfig) {
   const hub = new Hub(cfg.hub, w.token);
@@ -598,6 +601,14 @@ async function runWorker(cfg: Config, w: WorkerConfig) {
     catch (e) { log(`#${d.task_id} 無法領取：${(e as Error).message}`); return; }
     const dir = join(workRoot, `task-${d.task_id}`);
     const outDir = join(dir, "out");
+    // 重做時舊的 out/ 改名保留（可參考，不能當這次的結果）：驗收與上傳只看新的空 out/，舊檔不會讓驗收矇混過關
+    let prevOut: string | null = null;
+    if (existsSync(outDir) && readdirSync(outDir).length) {
+      const n = Math.max(1, (d.attempt ?? 2) - 1);
+      prevOut = join(dir, `out.prev-${n}`);
+      for (let i = 2; existsSync(prevOut); i++) prevOut = join(dir, `out.prev-${n}-${i}`);
+      renameSync(outDir, prevOut);
+    }
     mkdirSync(outDir, { recursive: true });
     // 給主管的結論寫在這個檔案；過程不送出（完整過程另存 worker-*.log 給人查）
     const answerFile = join(dir, "answer.md");
@@ -607,11 +618,19 @@ async function runWorker(cfg: Config, w: WorkerConfig) {
       "",
       `任務 #${d.task_id}：${d.title}`,
       "",
+      ...(d.review_note || d.prev_result || prevOut ? [
+        `這是這個任務的第 ${d.attempt ?? 2} 次執行${d.reason === "reject" ? "，上次的結果被主管退回" : d.reason === "retry" ? "，上次沒有通過" : d.reason === "reassign" ? "，前一位執行者沒有完成，改派給你" : ""}。`,
+        ...(d.review_note ? ["退回說明（請逐條照做）：", d.review_note, ""] : []),
+        ...(d.prev_result ? ["上次的結果／失敗原因（尾段）：", d.prev_result, ""] : []),
+        ...(prevOut ? [`上次的輸出已移到 ${prevOut}：只能參考，不能直接當這次的結果；這次的檔案要重新產生並放進下面的輸出資料夾。`] : []),
+        "請先針對上面的問題修正，不要直接重跑上次的做法或腳本。",
+        "",
+      ] : []),
       d.instructions,
       "",
       `你在 ${IS_WIN ? "Windows（路徑像 D:\\data\\a.csv）" : "Linux"} 上執行。工作目錄：${dir}`,
       "任務說明裡提到的指令或工具只是建議；被你的安全規則擋下或無法執行時，改用其他方法達成同樣的結果，並在結論裡說明用了什麼方法。",
-      `要交付的檔案請放在：${outDir}`,
+      `要交付的檔案請放在：${outDir}（這次任務只用這個資料夾；不要寫到其他任務的資料夾，也不要沿用之前任務或環境變數裡留下的路徑）`,
       ...(d.verify ? [`完成後系統會執行驗收指令：${d.verify}（結束碼 0 才算完成）`] : []),
       "",
       `最後，把要交給主管的結論寫進檔案：${answerFile}`,
