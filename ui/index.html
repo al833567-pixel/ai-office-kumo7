@@ -261,7 +261,7 @@ a.tag{text-decoration:none}
     <label class="lf" id="lfName" hidden>顯示名稱<input id="loginName" autocomplete="nickname" placeholder="例如：老闆"></label>
     <label class="lf" id="lfPass">密碼<input id="loginPass" type="password" name="password" autocomplete="current-password"></label>
     <label class="lf" id="lfPass2" hidden>再輸入一次密碼<input id="loginPass2" type="password" autocomplete="new-password"></label>
-    <label class="lf" id="lfToken" hidden>token<input id="loginToken" placeholder="1000000001:xxxxxxxx" autocomplete="off"></label>
+    <label class="lf" id="lfToken" hidden><span id="lfTokenLabel">token</span><input id="loginToken" placeholder="1000000001:xxxxxxxx" autocomplete="off"></label>
     <p class="loginErr" id="loginErr"></p>
     <button class="btn" type="submit" id="loginBtn">登入</button>
     <button class="linkbtn" type="button" id="useToken">改用 token 登入</button>
@@ -1039,7 +1039,7 @@ function connect() {
 }
 
 /* ---------- 登入：第一次設定帳密／帳號密碼登入／（備用）token ---------- */
-let loginMode = "login";
+let loginMode = "login", setupRemote = false;
 function setLoginMode(mode, hint) {
   loginMode = mode;
   const show = (id, on) => { $(id).hidden = !on; };
@@ -1060,7 +1060,11 @@ async function showLogin(err) {
   $("#loginErr").textContent = err || "";
   try {
     const st = (await (await fetch("/auth/status")).json()).result;
-    if (st.setup_needed && !st.local) { setLoginMode("setup", "還沒設定帳號密碼。第一次設定請在 Hub 那台電腦開 http://127.0.0.1:7070。"); $("#loginBtn").disabled = true; }
+    if (st.setup_needed && !st.local) {
+      // 不在 Hub 那台：要附上 boss 的 token 才能設定（避免別台搶先設定）
+      setLoginMode("setup", "還沒設定帳號密碼。最簡單：到 Hub 那台電腦（A 機）開 http://127.0.0.1:7070 設定。要在這台設定，請在最下面貼上 boss 的 token（在 A 機的 data\\tokens.local.json 裡）。");
+      setupRemote = true; $("#lfToken").hidden = false; $("#lfTokenLabel").textContent = "boss 的 token";
+    }
     else setLoginMode(st.setup_needed ? "setup" : "login");
   } catch { setLoginMode("login"); }
   (loginMode === "token" ? $("#loginToken") : $("#loginUser")).focus();
@@ -1078,13 +1082,19 @@ $("#loginForm").addEventListener("submit", async (e) => {
   $("#loginErr").textContent = "";
   if (loginMode === "token") { const t = $("#loginToken").value.trim(); if (t) loggedIn(t); return; }
   const body = { username: $("#loginUser").value.trim(), password: $("#loginPass").value };
+  const headers = { "content-type": "application/json" };
   if (loginMode === "setup") {
     if (body.password !== $("#loginPass2").value) { $("#loginErr").textContent = "兩次密碼不一樣。"; return; }
     body.name = $("#loginName").value.trim();
+    if (setupRemote) {
+      const t = $("#loginToken").value.trim();
+      if (!t) { $("#loginErr").textContent = "不在 Hub 那台電腦設定時，要貼上 boss 的 token。"; return; }
+      headers.authorization = `Bearer ${t}`;
+    }
   }
   $("#loginBtn").disabled = true;
   try {
-    const r = await (await fetch(`/auth/${loginMode === "setup" ? "setup" : "login"}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).json();
+    const r = await (await fetch(`/auth/${loginMode === "setup" ? "setup" : "login"}`, { method: "POST", headers, body: JSON.stringify(body) })).json();
     if (!r.ok) { $("#loginErr").textContent = (r.description || "登入失敗").replace(/^[A-Za-z ]+:\s*/, ""); return; }
     loggedIn(r.result.token);
   } catch { $("#loginErr").textContent = "連不到 Hub。"; }

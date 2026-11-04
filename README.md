@@ -72,7 +72,7 @@ bun run init
 scripts\windows\start-hub.cmd
 ```
 
-預設只聽 `127.0.0.1:7070`。在 A 機用瀏覽器開 `http://127.0.0.1:7070/`：第一次會請你**設定管理者帳號和密碼**，之後在任何電腦都用這組帳密登入，不用 token。（第一次設定只能在 A 機本機做，避免別台搶先設定；忘記密碼時仍可點「改用 token 登入」，用 `data\tokens.local.json` 裡 `boss` 的 token 登入後再改密碼。）
+預設只聽 `127.0.0.1:7070`。在 A 機用瀏覽器開 `http://127.0.0.1:7070/`：第一次會請你**設定管理者帳號和密碼**，之後在任何電腦都用這組帳密登入，不用 token。（第一次設定要在 A 機本機做，避免別台搶先設定；在別台設定時，登入畫面最下面要貼上 `data\tokens.local.json` 裡 `boss` 的 token。忘記密碼時仍可點「改用 token 登入」，用 `data\tokens.local.json` 裡 `boss` 的 token 登入後再改密碼。）
 
 要讓 B 機連進來時：登入 Tailscale，在專案根目錄建立 `hub.env.cmd`，寫一行 `set HUB_HOST=127.0.0.1,<A 機的 Tailscale IP>`（用 `tailscale ip -4` 查），重開 Hub。本機與 Tailscale 同時可連，A 機現有的設定都不用改；B 機用 Tailscale IP 連。
 
