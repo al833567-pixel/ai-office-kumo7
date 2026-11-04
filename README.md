@@ -72,7 +72,7 @@ bun run init
 scripts\windows\start-hub.cmd
 ```
 
-預設只聽 `127.0.0.1:7070`。瀏覽器開 `http://127.0.0.1:7070/`，貼上 `boss` 的 token 登入。
+預設只聽 `127.0.0.1:7070`。在 A 機用瀏覽器開 `http://127.0.0.1:7070/`：第一次會請你**設定管理者帳號和密碼**，之後在任何電腦都用這組帳密登入，不用 token。（第一次設定只能在 A 機本機做，避免別台搶先設定；忘記密碼時仍可點「改用 token 登入」，用 `data\tokens.local.json` 裡 `boss` 的 token 登入後再改密碼。）
 
 要讓 B 機連進來時：登入 Tailscale，在專案根目錄建立 `hub.env.cmd`，寫一行 `set HUB_HOST=127.0.0.1,<A 機的 Tailscale IP>`（用 `tailscale ip -4` 查），重開 Hub。本機與 Tailscale 同時可連，A 機現有的設定都不用改；B 機用 Tailscale IP 連。
 
@@ -149,13 +149,36 @@ powershell -NoProfile -Command "if ((Get-Item out\report.csv).Length -gt 0) { ex
 
 ---
 
+## 加入新的 agent（不用手動貼 token）
+
+在新的電腦（或同一台要多加一個 AI）執行一行，網頁上按確認就好：
+
+```bash
+office join http://<A 機的 Tailscale IP>:7070 --kind claude --machine B
+```
+
+1. 那台的終端機會印出 4 位數**確認代碼**；辦公室網頁上方同時跳出申請卡片。
+2. 核對兩邊代碼一樣，可以改名稱或帳號，按「確認加入」。
+3. token 自動寫進那台的 `~/.office/config.json`（原本的設定會保留）：
+   - `--kind claude`：寫成 `claude_token`，並自動執行 `office setup-desktop`（Claude Code 桌面版當主管）。要用終端機頻道模式就加 `--channel`。
+   - `--kind hermes|codex|antigravity`：加進 `workers`，並填好該平台的預設執行指令；`other` 要自己填指令。
+4. 重新啟動 office-node（`office run` 或「AI Office Node」排程工作）。
+
+說明：
+- 種類：`claude`、`hermes`、`codex`、`antigravity`、`other`；`--name` 可指定顯示名稱；`--machine` 不填就用設定檔裡的 `machine`，再沒有就用電腦名稱。
+- 卡片上的帳號預設是「種類_機器」（例如 `claude_b`）。這個帳號已經存在且種類相同（例如 `init` 建好的 `claude_b`）就是**重新加入**：沿用帳號、換新 token，舊 token 立即失效。重灌或換電腦時也這樣用。
+- 申請 15 分鐘內有效，被拒絕或過期時那台不會改設定檔。
+- 原本手動貼 token 的方式（`bun run cli add`、設定檔）仍然可以用。
+
+---
+
 ## 三、兩台 Windows：設定 Claude Code
 
 以下 A、B 兩台各做一次（B 機先 `git clone` 專案、`bun install`）。
 
 ### 1. 設定檔
 
-A 機在第二節已經建好設定檔。B 機複製 `node\config.windows-B.example.json` 到 `%USERPROFILE%\.office\config.json`，填 `claude_b` 的 token，`hub` 填 A 機的 Tailscale IP。
+A 機在第二節已經建好設定檔。B 機最簡單的做法是 `office join http://<A 機的 Tailscale IP>:7070 --kind claude --machine B`，在網頁按確認（見上一節）；或手動複製 `node\config.windows-B.example.json` 到 `%USERPROFILE%\.office\config.json`，填 `claude_b` 的 token，`hub` 填 A 機的 Tailscale IP。
 
 把 `node` 資料夾加進使用者 PATH（讓 Claude 能在終端機執行 `office upload`、`office download`）：
 
@@ -356,6 +379,10 @@ Hermes、Codex、Antigravity 等支援 MCP 的平台也能當櫃台（接 Hub �
 | `uploadFile` | — | 只上傳不發訊息 |
 | `pressButton` | — | 真人按 bot 訊息上的按鈕（UI 批准權限用） |
 | `heartbeat` | — | office-node 心跳 |
+| `getJoinRequests` / `approveJoin` / `rejectJoin` | — | 真人：查看、確認、拒絕 agent 加入申請 |
+| `changePassword` | — | 真人改網頁登入密碼 |
+
+不需要 token 的入口：`GET /auth/status`、`POST /auth/setup`（第一次設定帳密，只限 Hub 本機）、`POST /auth/login`、`POST /auth/logout`；`POST /join`（申請加入，回傳確認代碼）、`POST /join/wait`（等網頁確認後取得 token，只交一次）。
 | — | `office_send`、`office_whoami`、`office_file_info` | 發訊息、身分、檔案資訊 |
 
 ---
@@ -364,6 +391,8 @@ Hermes、Codex、Antigravity 等支援 MCP 的平台也能當櫃台（接 Hub �
 
 - Hub 只綁 Tailscale IP，不開對外 port
 - 每個帳號一組 token，資料庫只存雜湊；`bun run cli token <帳號>` 可換新 token
+- 網頁用帳號密碼登入：密碼用 argon2 雜湊；登入後拿到 90 天的 session（登出即失效）；同一個來源 10 分鐘內失敗 10 次就暫停登入；第一次設定帳密只限 Hub 本機
+- agent 加入要真人在網頁確認，並核對兩邊的 4 位數代碼；token 只交給發出申請的那台（要帶申請時拿到的祕密），交出後就從資料庫清掉
 - Claude Code 會把其他 agent 的訊息標示為「來自同事」，不是你的指令
 - 權限批准只接受 `approvers` 裡的真人；其他 bot 回「yes 代碼」或按按鈕都無效（有測試）
 - hooks 只送事件名稱、工具名稱和指令前 300 字，不送檔案內容與工具輸出

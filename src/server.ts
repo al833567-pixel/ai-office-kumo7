@@ -15,8 +15,10 @@ import { ApiError, callMethod, getFileRow, registerMethods, type Ctx, type HubOp
 import { UpdateQueue } from "./updates";
 import { taskMethods, handleHook, startWatchdog, agentStates, goalObj, taskObj, type GoalRow, type TaskRow } from "./tasks";
 import { handleMcp } from "./mcp";
+import { accessMethods, createJoin, handleAuth, pendingJoins, waitJoin } from "./access";
 
 registerMethods(taskMethods);
+registerMethods(accessMethods);
 
 export interface HubConfig extends Partial<HubOptions> {
   host?: string;
@@ -101,7 +103,8 @@ export function startHub(cfg: HubConfig = {}) {
       .reverse().filter((e) => visible(me, e.chat_key)).map((e) => ({ ...e, payload: JSON.parse(e.payload) }));
     const accounts = (db.query("SELECT id, username, first_name, is_bot, kind, machine FROM accounts WHERE disabled = 0").all());
     return { type: "snapshot", me: { id: me.id, username: me.username, name: me.first_name }, office_chat_id: OFFICE_GROUP_ID,
-      accounts, agents: agentStates(ctxFor(me)), goals: goals.map((g) => goalObj(db, g)), tasks: tasks.map((t) => taskObj(db, t)), events };
+      accounts, agents: agentStates(ctxFor(me)), goals: goals.map((g) => goalObj(db, g)), tasks: tasks.map((t) => taskObj(db, t)), events,
+      joins: pendingJoins(db) };
   }
   const visible = (me: Account, key: string | null) => !key || key.startsWith("g:") || key.split(":").slice(1).map(Number).includes(me.id);
 
@@ -147,6 +150,24 @@ export function startHub(cfg: HubConfig = {}) {
           const hit = candidates.find(([f]) => existsSync(f));
           if (!hit) return new Response("icon not found", { status: 404 });
           return new Response(Bun.file(hit[0]), { headers: { "content-type": hit[1], "cache-control": "no-cache" } });
+        }
+
+        // 網頁登入（帳號密碼）：/auth/status、/auth/setup、/auth/login、/auth/logout
+        const am = /^\/auth\/(status|setup|login|logout)$/.exec(path);
+        if (am) {
+          if (am[1] !== "status" && req.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } });
+          const body = req.method === "POST" ? await req.json().catch(() => ({})) as Record<string, unknown> : {};
+          const ip = srv.requestIP(req)?.address ?? "";
+          return reply({ ok: true, result: await handleAuth(db, am[1], body, ip, bearer(req), req.headers.get("user-agent")) });
+        }
+
+        // 新 agent 申請加入（office join）：不需要 token，網頁按確認後才發 token
+        if (path === "/join" || path === "/join/wait") {
+          if (req.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } });
+          const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+          if (path === "/join") return reply({ ok: true, result: createJoin(db, body, srv.requestIP(req)?.address ?? "") });
+          srv.timeout(req, 0);
+          return reply({ ok: true, result: await waitJoin(db, body, req.signal) });
         }
 
         if (path === "/ws") {

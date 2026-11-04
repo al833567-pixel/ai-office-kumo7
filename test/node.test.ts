@@ -277,3 +277,36 @@ describe("Windows 腳本", () => {
     for (const f of files) expect({ f, bad: /[^\x00-\x7F]/.test(readFileSync(f, "utf8")) }).toEqual({ f, bad: false });
   });
 });
+
+describe("office join", () => {
+  test("申請 → 網頁確認 → 執行者寫進設定檔（保留原本設定）", async () => {
+    const cfgJoin = join(dir, "join.json");
+    writeFileSync(cfgJoin, JSON.stringify({ hub: hub.url, machine: "Z", approvers: [1000000001] }));
+    const p = Bun.spawn([BUN, OFFICE, "join", hub.url, "--kind", "codex", "--name", "Codex-Z"], { env: { ...process.env, OFFICE_CONFIG: cfgJoin }, stdout: "pipe", stderr: "pipe" });
+    let req: any = null;
+    for (let t = 0; t < 10000 && !req; t += 100) { req = (await ok("boss", "getJoinRequests")).find((j: any) => j.name === "Codex-Z"); if (!req) await Bun.sleep(100); }
+    expect(req).toMatchObject({ kind: "codex", machine: "Z", suggested_username: "codex_z" });
+    await ok("boss", "approveJoin", { request_id: req.request_id });
+    expect(await p.exited).toBe(0);
+    const out = await new Response(p.stdout).text();
+    expect(out).toContain(`確認代碼：${req.code}`);
+    const cfg = JSON.parse(readFileSync(cfgJoin, "utf8"));
+    expect(cfg.approvers).toEqual([1000000001]);
+    expect(cfg.workers).toHaveLength(1);
+    expect(cfg.workers[0]).toMatchObject({ name: "codex_z", prompt_via: "stdin" });
+    expect(cfg.workers[0].cmd[0]).toBe("codex");
+    const me = await (await fetch(`${hub.url}/bot${cfg.workers[0].token}/getMe`)).json() as any;
+    expect(me.result.username).toBe("codex_z");
+  });
+
+  test("被拒絕時結束碼不是 0，設定檔不變", async () => {
+    const cfgJoin = join(dir, "join2.json");
+    writeFileSync(cfgJoin, JSON.stringify({ hub: hub.url }));
+    const p = Bun.spawn([BUN, OFFICE, "join", "--kind", "hermes", "--machine", "Q"], { env: { ...process.env, OFFICE_CONFIG: cfgJoin }, stdout: "pipe", stderr: "pipe" });
+    let req: any = null;
+    for (let t = 0; t < 10000 && !req; t += 100) { req = (await ok("boss", "getJoinRequests")).find((j: any) => j.machine === "Q"); if (!req) await Bun.sleep(100); }
+    await ok("boss", "rejectJoin", { request_id: req.request_id });
+    expect(await p.exited).not.toBe(0);
+    expect(JSON.parse(readFileSync(cfgJoin, "utf8"))).toEqual({ hub: hub.url });
+  });
+});

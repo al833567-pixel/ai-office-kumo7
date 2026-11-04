@@ -155,6 +155,34 @@ CREATE TABLE IF NOT EXISTS wait_cursor (
   last_update_id INTEGER NOT NULL
 );
 
+-- 網頁登入（帳號密碼）產生的 session；token 格式與帳號 token 相同（<帳號 id>:<祕密>），只存雜湊
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash  TEXT    PRIMARY KEY,
+  account_id  INTEGER NOT NULL REFERENCES accounts(id),
+  created_at  INTEGER NOT NULL,
+  expires_at  INTEGER NOT NULL,
+  agent       TEXT
+);
+
+-- 新 agent 申請加入（office join）：網頁按確認後才建立帳號
+CREATE TABLE IF NOT EXISTS join_requests (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  code        TEXT    NOT NULL,
+  secret_hash TEXT    NOT NULL,
+  kind        TEXT    NOT NULL,
+  name        TEXT    NOT NULL,
+  machine     TEXT,
+  hostname    TEXT,
+  platform    TEXT,
+  ip          TEXT,
+  status      TEXT    NOT NULL DEFAULT 'pending',
+  username    TEXT,
+  token       TEXT,
+  created_at  INTEGER NOT NULL,
+  expires_at  INTEGER NOT NULL,
+  decided_by  INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS loop_guard (
   chat_key    TEXT    NOT NULL,
   thread_id   INTEGER NOT NULL,
@@ -173,6 +201,7 @@ export interface Account {
   kind: string;
   machine: string | null;
   disabled: number;
+  password_hash?: string | null;
   created_at: number;
 }
 
@@ -209,6 +238,7 @@ export function openDb(path: string): Database {
   const cols = (db.query("PRAGMA table_info(accounts)").all() as { name: string }[]).map((c) => c.name);
   if (!cols.includes("kind")) db.exec("ALTER TABLE accounts ADD COLUMN kind TEXT NOT NULL DEFAULT 'other'");
   if (!cols.includes("machine")) db.exec("ALTER TABLE accounts ADD COLUMN machine TEXT");
+  if (!cols.includes("password_hash")) db.exec("ALTER TABLE accounts ADD COLUMN password_hash TEXT");
   const mcols = (db.query("PRAGMA table_info(messages)").all() as { name: string }[]).map((c) => c.name);
   if (!mcols.includes("media")) db.exec("ALTER TABLE messages ADD COLUMN media TEXT");
   const tcols = (db.query("PRAGMA table_info(tasks)").all() as { name: string }[]).map((c) => c.name);

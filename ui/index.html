@@ -152,6 +152,17 @@ a.tag{text-decoration:none}
 .login input{background:var(--panel-2);border:2px solid var(--soft);border-radius:8px;padding:9px 12px;font-family:var(--f-mono);font-size:13px}
 .login h2{margin:0;font-family:var(--f-round);font-weight:900}
 .loginErr{color:#B8473B;font-size:13px;min-height:1em;margin:0}
+.login .lf{display:flex;flex-direction:column;gap:4px;font-weight:700;font-size:13px}
+.login .lf input{font-family:var(--f-round);font-size:15px}
+.linkbtn{background:none;border:0;color:var(--ink-2,#7A6455);font-size:12px;text-decoration:underline;cursor:pointer;align-self:center}
+.joins{display:flex;flex-direction:column;gap:8px;margin:10px 0}
+.join{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:10px 14px;border-color:#E9A65A;background:#FFF6E6}
+.join .who{display:flex;align-items:center;gap:6px;font-weight:900}
+.join .who img{width:20px;height:20px}
+.join .meta{font-size:12px;color:#7A6455}
+.join .code{font-family:var(--f-mono);font-weight:900;font-size:18px;letter-spacing:2px;background:#fff;border:2px dashed #E9A65A;border-radius:6px;padding:0 8px}
+.join input{background:var(--panel-2);border:2px solid var(--soft);border-radius:6px;padding:4px 8px;font-size:13px;width:130px}
+.join .acts{margin-left:auto;display:flex;gap:6px}
 .dtasks{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:12px}
 .dtasks li{display:flex;gap:8px}
 .stream .state{color:#F4C77A}
@@ -179,7 +190,7 @@ a.tag{text-decoration:none}
 <div class="wrap">
   <header class="top">
     <div class="brand"><h1>AI <span>辦公室</span></h1><span class="tagline" id="me">連線中…</span></div>
-    <div class="toolbar"><span class="conn off" id="conn">未連線</span><button class="btn tiny" type="button" id="notifyBtn">🔕 通知關</button><button class="btn tiny" type="button" id="logout">登出</button></div>
+    <div class="toolbar"><span class="conn off" id="conn">未連線</span><button class="btn tiny" type="button" id="notifyBtn">🔕 通知關</button><button class="btn tiny" type="button" id="pwBtn">改密碼</button><button class="btn tiny" type="button" id="logout">登出</button></div>
   </header>
 
   <form class="goal card-px" id="goalForm" autocomplete="off">
@@ -189,6 +200,8 @@ a.tag{text-decoration:none}
     </label>
     <button class="btn" type="submit">送出</button>
   </form>
+
+  <section class="joins" id="joins" aria-live="polite" hidden></section>
 
   <section class="stage" aria-label="辦公室畫面">
     <div class="scroller"><canvas id="game" aria-label="像素辦公室，點角色可看詳情"></canvas></div>
@@ -226,12 +239,17 @@ a.tag{text-decoration:none}
 </aside>
 
 <div class="login" id="login" hidden>
-  <form class="card-px" id="loginForm">
-    <h2>登入 AI 辦公室</h2>
-    <p class="hint">貼上你的真人帳號 token（Hub 上執行 <code>bun run cli token boss</code> 或看 data/tokens.local.json 裡的 boss）。token 只存在這個瀏覽器。</p>
-    <input id="loginToken" placeholder="1000000001:xxxxxxxx" autocomplete="off" aria-label="token">
+  <form class="card-px" id="loginForm" autocomplete="on">
+    <h2 id="loginTitle">登入 AI 辦公室</h2>
+    <p class="hint" id="loginHint"></p>
+    <label class="lf" id="lfUser">帳號<input id="loginUser" name="username" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
+    <label class="lf" id="lfName" hidden>顯示名稱<input id="loginName" autocomplete="nickname" placeholder="例如：老闆"></label>
+    <label class="lf" id="lfPass">密碼<input id="loginPass" type="password" name="password" autocomplete="current-password"></label>
+    <label class="lf" id="lfPass2" hidden>再輸入一次密碼<input id="loginPass2" type="password" autocomplete="new-password"></label>
+    <label class="lf" id="lfToken" hidden>token<input id="loginToken" placeholder="1000000001:xxxxxxxx" autocomplete="off"></label>
     <p class="loginErr" id="loginErr"></p>
-    <button class="btn" type="submit">登入</button>
+    <button class="btn" type="submit" id="loginBtn">登入</button>
+    <button class="linkbtn" type="button" id="useToken">改用 token 登入</button>
   </form>
 </div>
 <div class="toasts" id="toasts" aria-live="polite"></div>
@@ -929,7 +947,16 @@ function handleEvent(ev) {
       else if (prev.status !== p.status && p.status !== "doing") { toast(`🏁 目標 #${p.goal_id} ${p.status === "done" ? "完成" : p.status}`, "#E8B830"); notify(`目標 #${p.goal_id} ${p.status === "done" ? "完成" : p.status}`, p.summary || p.title); }
       renderBoard(); refreshThreads(); break;
     }
-    case "account": applyRename(p); break;
+    case "account":
+      if (p.joined || !accounts.some((a) => a.id === p.id)) { if (ws && ws.readyState === 1) ws.send("snapshot"); } // 新成員：重新分配工位
+      else applyRename(p);
+      break;
+    case "join": {
+      const i = joins.findIndex((j) => j.request_id === p.request_id);
+      if (i >= 0) joins[i] = p; else joins.push(p);
+      if (p.status === "pending" && i < 0) { toast(`🔔 ${KIND_LABEL[p.kind] || p.kind}「${p.name}」申請加入，代碼 ${p.code}`, "#E9A65A"); notify("新成員申請加入", `${p.name}（代碼 ${p.code}）`); }
+      renderJoins(); break;
+    }
     case "button_answer": if (p.to === ME?.id && p.text) toast(p.text, "#5DB585"); break;
     case "loop_guard": toast(`防循環：bot 在目標 #${p.thread_id || "-"} 互相回太多次，等你發言`, "#E0A43A"); break;
   }
@@ -944,6 +971,7 @@ function applySnapshot(s) {
   ME = s.me; OFFICE_CHAT = s.office_chat_id; accounts = s.accounts;
   mapAccounts();
   hubGoals = s.goals; hubTasks = s.tasks;
+  joins = s.joins || []; renderJoins();
   feed.length = 0;
   for (const ev of s.events) {
     if (ev.type === "message") feed.push(msgFromEvent(ev));
@@ -958,7 +986,7 @@ function applySnapshot(s) {
 }
 
 function connect() {
-  if (!TOKEN) { $("#login").hidden = false; return; }
+  if (!TOKEN) { showLogin(); return; }
   $("#login").hidden = true;
   const proto = location.protocol === "https:" ? "wss" : "ws";
   ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(TOKEN)}`);
@@ -967,22 +995,110 @@ function connect() {
   ws.onclose = (e) => {
     connected = false; setConn(false);
     if (e.code === 1006 && wsRetry === 0 && !ME) {
-      // 第一次就失敗：多半是 token 錯了
-      fetch(`/user${encodeURIComponent(TOKEN)}/getMe`).then((r) => r.json()).then((b) => { if (!b.ok) { $("#loginErr").textContent = "token 不正確，請重新輸入。"; $("#login").hidden = false; } });
+      // 第一次就失敗：多半是登入過期或 token 錯了
+      fetch(`/user${encodeURIComponent(TOKEN)}/getMe`).then((r) => r.json()).then((b) => {
+        if (!b.ok) { TOKEN = ""; try { localStorage.removeItem("office_token"); } catch {} if (ws) ws.onclose = null; showLogin("登入已過期，請重新登入。"); }
+      });
     }
-    wsRetry++; setTimeout(connect, Math.min(10000, 1000 * wsRetry));
+    if (TOKEN) { wsRetry++; setTimeout(connect, Math.min(10000, 1000 * wsRetry)); }
   };
+}
+
+/* ---------- 登入：第一次設定帳密／帳號密碼登入／（備用）token ---------- */
+let loginMode = "login";
+function setLoginMode(mode, hint) {
+  loginMode = mode;
+  const show = (id, on) => { $(id).hidden = !on; };
+  show("#lfUser", mode !== "token"); show("#lfPass", mode !== "token"); show("#lfToken", mode === "token");
+  show("#lfName", mode === "setup"); show("#lfPass2", mode === "setup");
+  $("#loginPass").autocomplete = mode === "setup" ? "new-password" : "current-password";
+  $("#loginTitle").textContent = mode === "setup" ? "第一次使用：設定管理者帳號" : "登入 AI 辦公室";
+  $("#loginBtn").textContent = mode === "setup" ? "設定並登入" : "登入";
+  $("#useToken").textContent = mode === "token" ? "改用帳號密碼登入" : "改用 token 登入";
+  $("#useToken").hidden = mode === "setup";
+  $("#loginHint").textContent = hint ?? (mode === "setup"
+    ? "設定你自己的帳號和密碼，之後在任何電腦用這組帳密登入。agent 不用這組帳密。"
+    : mode === "token" ? "貼上真人帳號的 token（舊方式，看 Hub 的 data/tokens.local.json）。" : "");
+  $("#loginBtn").disabled = false;
+}
+async function showLogin(err) {
+  $("#login").hidden = false;
+  $("#loginErr").textContent = err || "";
+  try {
+    const st = (await (await fetch("/auth/status")).json()).result;
+    if (st.setup_needed && !st.local) { setLoginMode("setup", "還沒設定帳號密碼。第一次設定請在 Hub 那台電腦開 http://127.0.0.1:7070。"); $("#loginBtn").disabled = true; }
+    else setLoginMode(st.setup_needed ? "setup" : "login");
+  } catch { setLoginMode("login"); }
+  (loginMode === "token" ? $("#loginToken") : $("#loginUser")).focus();
+}
+function loggedIn(token) {
+  TOKEN = token;
+  try { localStorage.setItem("office_token", TOKEN); } catch {}
+  $("#loginPass").value = ""; $("#loginPass2").value = "";
+  connect();
 }
 function setConn(on) { $("#conn").className = "conn " + (on ? "on" : "off"); $("#conn").textContent = on ? "已連線" : "連線中斷，重試中…"; }
 
-$("#loginForm").addEventListener("submit", (e) => {
+$("#loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-  TOKEN = $("#loginToken").value.trim();
-  try { localStorage.setItem("office_token", TOKEN); } catch {}
   $("#loginErr").textContent = "";
-  connect();
+  if (loginMode === "token") { const t = $("#loginToken").value.trim(); if (t) loggedIn(t); return; }
+  const body = { username: $("#loginUser").value.trim(), password: $("#loginPass").value };
+  if (loginMode === "setup") {
+    if (body.password !== $("#loginPass2").value) { $("#loginErr").textContent = "兩次密碼不一樣。"; return; }
+    body.name = $("#loginName").value.trim();
+  }
+  $("#loginBtn").disabled = true;
+  try {
+    const r = await (await fetch(`/auth/${loginMode === "setup" ? "setup" : "login"}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).json();
+    if (!r.ok) { $("#loginErr").textContent = (r.description || "登入失敗").replace(/^[A-Za-z ]+:\s*/, ""); return; }
+    loggedIn(r.result.token);
+  } catch { $("#loginErr").textContent = "連不到 Hub。"; }
+  finally { $("#loginBtn").disabled = false; }
 });
-$("#logout").addEventListener("click", () => { try { localStorage.removeItem("office_token"); } catch {} location.reload(); });
+$("#useToken").addEventListener("click", () => { setLoginMode(loginMode === "token" ? "login" : "token"); $("#loginErr").textContent = ""; });
+$("#logout").addEventListener("click", async () => {
+  try { await fetch("/auth/logout", { method: "POST", headers: { authorization: `Bearer ${TOKEN}` } }); } catch {}
+  try { localStorage.removeItem("office_token"); } catch {}
+  location.reload();
+});
+$("#pwBtn").addEventListener("click", async () => {
+  const old = prompt("目前的密碼（用 token 登入、還沒設過密碼的話留空）"); if (old === null) return;
+  const nw = prompt("新密碼（至少 6 個字元）"); if (!nw) return;
+  if (prompt("再輸入一次新密碼") !== nw) { toast("兩次密碼不一樣", "#E0675A"); return; }
+  try { await api("changePassword", { old_password: old, new_password: nw }); toast("密碼已更新", "#5DB585"); }
+  catch (err) { toast(String(err.message).replace(/^[A-Za-z ]+:\s*/, ""), "#E0675A"); }
+});
+
+/* ---------- 新 agent 申請加入 ---------- */
+let joins = [];
+const KIND_LABEL = { claude: "Claude", hermes: "Hermes", codex: "Codex", antigravity: "Antigravity", other: "其他" };
+function renderJoins() {
+  const box = $("#joins");
+  const list = joins.filter((j) => j.status === "pending" && j.expires_at > Date.now());
+  box.hidden = !list.length;
+  box.innerHTML = list.map((j) => `<div class="join card-px" data-id="${j.request_id}">
+    <span class="who">🔔 新成員申請加入：<img src="/icons/${esc(j.kind)}" alt="">${esc(KIND_LABEL[j.kind] || j.kind)}</span>
+    <span class="meta">${j.machine ? `機器 ${esc(j.machine)} · ` : ""}${j.hostname ? `電腦 ${esc(j.hostname)} · ` : ""}${esc(j.platform || "")}${j.ip ? ` · ${esc(j.ip)}` : ""}</span>
+    <span class="meta">確認代碼 <span class="code">${esc(j.code)}</span>（要跟那台電腦畫面上的一樣）</span>
+    <label class="meta">名稱 <input class="jn" value="${esc(j.name)}" maxlength="24"></label>
+    <label class="meta">帳號 <input class="ju" value="${esc(j.suggested_username || "")}" maxlength="32" title="填既有的 agent 帳號＝重新加入（換新 token）"></label>${j.existing_account ? `<span class="meta">（沿用既有帳號，舊 token 會失效）</span>` : ""}
+    <span class="acts"><button class="btn sm" type="button" data-act="ok">確認加入</button><button class="btn sm ghost" type="button" data-act="no">拒絕</button></span>
+  </div>`).join("");
+}
+$("#joins").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-act]"); if (!b) return;
+  const card = b.closest(".join"), id = Number(card.dataset.id);
+  b.disabled = true;
+  try {
+    if (b.dataset.act === "ok") {
+      const r = await api("approveJoin", { request_id: id, name: card.querySelector(".jn").value.trim(), username: card.querySelector(".ju").value.trim() });
+      toast(`${r.name}（@${r.username}）${r.rejoined ? "重新加入" : "加入"}辦公室`, "#5DB585");
+    } else { await api("rejectJoin", { request_id: id }); toast("已拒絕加入申請", "#A79C93"); }
+  } catch (err) { toast(String(err.message).replace(/^[A-Za-z ]+:\s*/, ""), "#E0675A"); b.disabled = false; }
+});
+setInterval(() => { if (joins.some((j) => j.status === "pending" && j.expires_at <= Date.now())) renderJoins(); }, 30000);
+
 $("#notifyBtn").addEventListener("click", async () => {
   if (!("Notification" in window)) { toast("這個瀏覽器不支援桌面通知", "#E0675A"); return; }
   if (!notifyOn) { const p = await Notification.requestPermission(); notifyOn = p === "granted"; } else notifyOn = false;

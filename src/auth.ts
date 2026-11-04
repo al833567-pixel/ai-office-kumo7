@@ -42,8 +42,31 @@ export function authenticate(db: Database, token: string): Account | null {
   if (!acc || acc.disabled) return null;
   const a = Buffer.from(sha256(m[2]), "hex");
   const b = Buffer.from(acc.token_hash, "hex");
-  return a.length === b.length && timingSafeEqual(a, b) ? acc : null;
+  if (a.length === b.length && timingSafeEqual(a, b)) return acc;
+  // 網頁登入的 session（只有真人帳號）
+  if (!acc.is_bot) {
+    const s = db.query("SELECT expires_at FROM sessions WHERE token_hash = ? AND account_id = ?").get(sha256(m[2]), acc.id) as { expires_at: number } | null;
+    if (s && s.expires_at > Date.now()) return acc;
+  }
+  return null;
 }
+
+/** 網頁登入成功後發 session token（格式同帳號 token） */
+export function createSession(db: Database, acc: Account, days = 90, agent: string | null = null): string {
+  const secret = newSecret();
+  const t = Date.now();
+  db.query("DELETE FROM sessions WHERE expires_at < ?").run(t);
+  db.query("INSERT INTO sessions (token_hash, account_id, created_at, expires_at, agent) VALUES (?, ?, ?, ?, ?)")
+    .run(sha256(secret), acc.id, t, t + days * 86400_000, agent);
+  return `${acc.id}:${secret}`;
+}
+
+export function deleteSession(db: Database, token: string) {
+  const m = /^(\d+):([A-Za-z0-9_-]{16,})$/.exec(token);
+  if (m) db.query("DELETE FROM sessions WHERE token_hash = ?").run(sha256(m[2]));
+}
+
+export const hashSecret = sha256;
 
 /** 記錄用：只留 id，遮掉祕密字串 */
 export const maskToken = (token: string) => token.replace(/:(.+)$/, ":***");

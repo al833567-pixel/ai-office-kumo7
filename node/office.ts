@@ -1,6 +1,9 @@
 #!/usr/bin/env bun
 // office：每台 agent 機器上的工具（Bun 單檔，不需安裝套件；Windows 與 Linux 都能用）。
 //
+//   office join <Hub 網址> --kind <種類> [--name 名稱] [--machine B]
+//                                    申請加入辦公室：網頁上按確認後，token 自動寫進設定檔（不用手動貼 token）
+//                                    種類：claude｜hermes｜codex｜antigravity｜other
 //   office run                       常駐：執行者接線（收派工→執行→驗收→回報）、心跳、Claude session 偵測
 //                                    一台可同時接多個執行者（Hermes、Codex、Antigravity 或任何命令列 AI）
 //   office ask "<目標>" [選項]         櫃台：把目標交給團隊，等到完成後印出總結（需要 boss_token）
@@ -19,7 +22,7 @@
 // 設定檔：~/.office/config.json（或環境變數 OFFICE_CONFIG 指定路徑）。
 // 指令用哪個帳號：環境變數 OFFICE_AS（claude｜帳號名稱｜hermes），沒設就用 claude_token。
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, chmodSync, copyFileSync, unlinkSync } from "node:fs";
-import { homedir, platform } from "node:os";
+import { homedir, hostname, platform } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 
@@ -440,6 +443,88 @@ async function cmdSetupDesktop(cfg: Config, args: string[]) {
   3. 不要再同時開 office-claude（終端機辦公室 session）用同一個帳號，兩邊會搶派工訊息。`);
 }
 
+// ---------------- 申請加入（office join） ----------------
+/** 各種執行者的預設指令（之後可以在設定檔改） */
+function workerTemplate(kind: string): Partial<WorkerConfig> & { _note?: string } {
+  switch (kind) {
+    case "hermes": return IS_WIN
+      ? { cmd: ["%LOCALAPPDATA%\\hermes\\bin\\hermes.exe", "chat", "-Q", "--query-file", "{prompt_file}"], timeout_min: 30 }
+      : { cmd: ["hermes", "chat", "-Q", "-q"], prompt_via: "arg", timeout_min: 30 };
+    case "codex": return { cmd: ["codex", "exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "-o", "{answer_file}", "-"], prompt_via: "stdin", timeout_min: 30 };
+    case "antigravity": return { cmd: ["agy", "-p"], prompt_via: "arg", timeout_min: 30 };
+    default: return { cmd: [], _note: "請填上這個 AI 的一次性執行指令，見 node/config.workers.example.json" };
+  }
+}
+
+async function cmdJoin(args: string[]) {
+  const opt = (f: string) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : undefined; };
+  const existing: Record<string, any> = existsSync(CONFIG_PATH) ? JSON.parse(readFileSync(CONFIG_PATH, "utf8")) : {};
+  const hubArg = args.find((a, i) => !a.startsWith("--") && (i === 0 || !args[i - 1].startsWith("--")));
+  const hub = (hubArg ?? existing.hub ?? "").replace(/\/+$/, "");
+  if (!hub) die("用法：office join <Hub 網址> --kind <claude|hermes|codex|antigravity|other> [--name 名稱] [--machine B]\n例如：office join http://100.77.189.29:7070 --kind claude --machine B");
+  const kind = (opt("--kind") ?? "").toLowerCase();
+  if (!["claude", "hermes", "codex", "antigravity", "other"].includes(kind)) die("請用 --kind 指定種類：claude、hermes、codex、antigravity、other");
+  const host = hostname();
+  const machine = opt("--machine") ?? existing.machine ?? host.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 16);
+  const name = opt("--name") ?? `${({ claude: "Claude", hermes: "Hermes", codex: "Codex", antigravity: "Antigravity", other: "Agent" } as Record<string, string>)[kind]}-${machine}`;
+
+  const post = async (path: string, body: unknown) => {
+    const res = await fetch(`${hub}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+      .catch((e) => die(`連不到 Hub ${hub}：${(e as Error).message}\n（Hub 有開嗎？這台有登入 Tailscale 嗎？）`));
+    const b = await res.json().catch(() => ({ ok: false, description: `HTTP ${res.status}` })) as { ok: boolean; result: any; description?: string };
+    if (!b.ok) die(`Hub 回應錯誤：${b.description}`);
+    return b.result;
+  };
+  const req = await post("/join", { kind, name, machine, hostname: host, platform: platform() });
+  console.log(`
+已送出加入申請：${name}（${kind}，機器 ${machine}）
+請打開辦公室網頁（${hub}），在上方的申請卡片按「確認加入」。
+
+    確認代碼：${req.code}    ← 網頁上的代碼要跟這裡一樣
+
+等待確認中（${Math.round(req.expires_in / 60)} 分鐘內有效，Ctrl+C 取消）…`);
+  let r: any;
+  do { r = await post("/join/wait", { request_id: req.request_id, secret: req.secret, timeout: 50 }); } while (r.status === "pending");
+  if (r.status === "rejected") die("加入申請被拒絕了。");
+  if (r.status === "expired") die("申請已過期，請重新執行 office join。");
+  if (r.status !== "approved" || !r.token) die(`沒有拿到 token（狀態：${r.status}），請重新執行 office join。`);
+
+  // 寫進設定檔（保留原本的其他設定）
+  const cfg = existing;
+  cfg.hub = hub;
+  cfg.machine ??= r.machine ?? machine;
+  let asProfile: string | null = null;
+  if (kind === "claude") {
+    const sameMain = cfg.claude_token && String(cfg.claude_token).split(":")[0] === String(r.token).split(":")[0];
+    if (!cfg.claude_token || sameMain) cfg.claude_token = r.token;
+    else { cfg.claude_profiles = { ...(cfg.claude_profiles ?? {}), [r.username]: r.token }; asProfile = r.username; }
+    cfg.claude_mode ??= args.includes("--channel") ? "channel" : "desktop";
+  } else {
+    const workers: any[] = Array.isArray(cfg.workers) ? cfg.workers : [];
+    const i = workers.findIndex((w) => w.name === r.username);
+    const w = i >= 0 ? { ...workers[i], token: r.token } : { name: r.username, token: r.token, ...workerTemplate(kind) };
+    if (i >= 0) workers[i] = w; else workers.push(w);
+    cfg.workers = workers;
+  }
+  mkdirSync(join(CONFIG_PATH, ".."), { recursive: true });
+  writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2) + "\n");
+  try { chmodSync(CONFIG_PATH, 0o600); } catch { /* Windows */ }
+  console.log(`\n✅ 已加入：@${r.username}（${r.name}）\n   token 已寫進 ${CONFIG_PATH}`);
+
+  if (kind === "claude" && cfg.claude_mode === "desktop") {
+    console.log("\n接著設定 Claude Code 桌面版：");
+    cfg.hub = hub;
+    await cmdSetupDesktop(cfg as Config, asProfile ? ["--as", asProfile] : []);
+  } else if (kind === "claude") {
+    console.log(`\n接著執行：office setup-claude${asProfile ? ` --as ${asProfile}` : ""}`);
+  } else {
+    const w = (cfg.workers as any[]).find((x) => x.name === r.username);
+    if (!w.cmd?.length) console.log(`\n⚠️ 請在設定檔替 ${r.username} 填上執行指令（cmd）。`);
+    else console.log(`\n執行指令（可在設定檔修改）：${w.cmd.join(" ")}`);
+  }
+  console.log("\n最後重新啟動 office-node（office run，或重開「AI Office Node」排程工作），再用 office doctor 檢查。");
+}
+
 // ---------------- 常駐：執行者接線 ----------------
 interface TaskData { type: "task"; task_id: number; goal_id: number; title: string; instructions: string; verify?: string | null; lead: string; attempt?: number }
 
@@ -638,7 +723,7 @@ async function cmdRun(cfg: Config) {
 
 // ---------------- 入口 ----------------
 const [cmd, ...args] = process.argv.slice(2);
-const cfg = cmd && cmd !== "help" ? loadConfig() : (null as unknown as Config);
+const cfg = cmd && cmd !== "help" && cmd !== "join" ? loadConfig() : (null as unknown as Config);
 switch (cmd) {
   case "run": await cmdRun(cfg); break;
   case "ask": await cmdAsk(cfg, args); break;
@@ -651,6 +736,7 @@ switch (cmd) {
   case "doctor": await cmdDoctor(cfg); break;
   case "setup-claude": await cmdSetupClaude(cfg, args); break;
   case "setup-desktop": await cmdSetupDesktop(cfg, args); break;
+  case "join": await cmdJoin(args); break;
   default:
-    console.log(readFileSync(import.meta.path, "utf8").split("\n").slice(1, 20).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
+    console.log(readFileSync(import.meta.path, "utf8").split("\n").slice(1, 23).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
 }
