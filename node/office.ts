@@ -54,6 +54,7 @@ interface Config {
   verify_timeout_sec?: number;
   claude_process_pattern?: string;
   claude_mode?: "channel" | "desktop";         // desktop：用 Claude Code 桌面版當主管（office setup-desktop）
+  claude_desktop_check?: boolean;              // 桌面版模式：檢查 Claude 桌面版有沒有開著，沒開就回報離線（預設 true）
 }
 
 const CONFIG_PATH = process.env.OFFICE_CONFIG ?? join(homedir(), ".office", "config.json");
@@ -366,7 +367,8 @@ async function cmdDoctor(cfg: Config) {
     const c = spawnSync("claude", ["--version"], { encoding: "utf8", shell: IS_WIN });
     ok(c.status === 0, `Claude Code 命令列版：${c.status === 0 ? c.stdout.trim() : "PATH 裡找不到 claude（只有桌面版時請執行 winget install Anthropic.ClaudeCode）"}`);
     if (cfg.claude_mode === "desktop") {
-      console.log("ℹ️ claude_mode=desktop：Claude 用桌面版當主管（office-desktop MCP），office-node 在跑就算在線");
+      const d = cfg.claude_desktop_check === false ? true : claudeDesktopUp();
+      console.log(`ℹ️ claude_mode=desktop：Claude 用桌面版當主管（office-desktop MCP）；桌面版${d === null ? "狀態無法判斷（當作開著）" : d ? "開著" : "沒有開著 → 網頁會顯示離線"}`);
       if (cfg.claude_process_pattern) console.log("ℹ️ claude_process_pattern 是終端機模式用的，桌面版模式會忽略它，可以從設定檔拿掉");
       const r = spawnSync("claude", ["mcp", "get", "office-desktop"], { encoding: "utf8", shell: IS_WIN });
       ok(r.status === 0, `Claude Code 設定裡有 office-desktop MCP${r.status === 0 ? "" : "（請執行 office setup-desktop）"}`);
@@ -462,6 +464,25 @@ async function cmdSetupDesktop(cfg: Config, args: string[]) {
   1. 設定檔加上 "claude_mode": "desktop"，再重新啟動 office-node（office run），UI 才會把 @${me.username} 顯示為在線。${cfg.claude_mode !== "desktop" ? "（目前還沒加）" : ""}${cfg.claude_process_pattern ? "\n     設定檔裡的 claude_process_pattern 是終端機模式用的，桌面版模式會忽略，可以拿掉。" : ""}
   2. 重開 Claude Code 桌面版，開新的本機 session，輸入：/office <目標>
   3. 不要再同時開 office-claude（終端機辦公室 session）用同一個帳號，兩邊會搶派工訊息。`);
+}
+
+// ---------------- Claude 桌面版有沒有開著 ----------------
+/** true＝開著、false＝沒開、null＝無法判斷（判斷不了就當作開著，不誤報離線）。
+ *  Windows：桌面版是 Electron 程式，執行時一定有帶 --type= 的子程序（命令列版 claude.exe 沒有），再加上常見安裝路徑當備援。
+ *  macOS：Claude.app。Linux：沒有桌面版，無法判斷。 */
+function claudeDesktopUp(): boolean | null {
+  if (IS_WIN) {
+    const q = "@(Get-CimInstance Win32_Process -Filter \"Name='claude.exe'\" | Where-Object { $_.CommandLine -match '--type=' -or $_.ExecutablePath -match 'AnthropicClaude|WindowsApps\\\\Claude' }).Count";
+    const r = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", q], { encoding: "utf8", timeout: 20_000 });
+    if (r.status !== 0) return null;
+    const n = Number(String(r.stdout).trim());
+    return Number.isFinite(n) ? n > 0 : null;
+  }
+  if (platform() === "darwin") {
+    const r = spawnSync("pgrep", ["-f", "Claude.app/Contents/MacOS/Claude"], { encoding: "utf8" });
+    return r.error ? null : r.status === 0;
+  }
+  return null;
 }
 
 // ---------------- 申請加入（office join） ----------------
@@ -723,12 +744,17 @@ async function cmdRun(cfg: Config) {
     return r.error ? null : r.status === 0;
   };
   if (claudeHub) {
-    // 桌面版模式：桌面版沒有頻道外掛和 hooks，這台的 office-node 在跑就算 Claude 在線；
+    // 桌面版模式：桌面版沒有頻道外掛和 hooks，改由 office-node 檢查桌面版有沒有開著；
     // claude_process_pattern 是終端機模式用的，桌面版模式忽略它（否則關掉 office-claude 就會被判離線）。
     const desktop = cfg.claude_mode === "desktop";
+    let lastDesktop: boolean | null | undefined;
     const beat = async () => {
       if (desktop) {
-        await claudeHub.call("heartbeat", { claude_session: true }).catch((e) => log("Claude 心跳失敗：", (e as Error).message));
+        // 桌面版關著時回報 session 沒在跑 → 網頁顯示離線；判斷不了（null）就當作開著
+        const up = cfg.claude_desktop_check === false ? true : claudeDesktopUp();
+        if (up !== lastDesktop) { if (lastDesktop !== undefined || up === false) log(up === false ? "Claude 桌面版沒有開著，回報離線" : "Claude 桌面版已開啟"); lastDesktop = up; }
+        await claudeHub.call("heartbeat", up === false ? { claude_session: false, session_only: true } : { claude_session: true })
+          .catch((e) => log("Claude 心跳失敗：", (e as Error).message));
         return;
       }
       const up = claudeUp();

@@ -190,7 +190,7 @@ office setup-desktop
 - 移除舊版教學加過的重複設定 `office-hub`。
 - 安裝 `/office` skill。
 
-接著確認設定檔有 `"claude_mode": "desktop"`，重開 office-node（桌面版沒有 hooks，改由 office-node 在跑就把這個 Claude 顯示為在線），再重開桌面版、開一個本機 session，輸入：
+接著確認設定檔有 `"claude_mode": "desktop"`，重開 office-node（桌面版沒有 hooks，改由 office-node 每 30 秒檢查 Claude 桌面版有沒有開著：開著就是在線，關掉就顯示離線；設定 `"claude_desktop_check": false` 可關閉這個檢查），再重開桌面版、開一個本機 session，輸入：
 
 ```
 /office 列出 A、B 兩台機器的磁碟使用量並整理成表格
