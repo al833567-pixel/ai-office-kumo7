@@ -4,7 +4,7 @@
 //   bun run src/cli.ts token <帳號>               重新產生 token（舊的立即失效）
 //   bun run src/cli.ts list                       列出帳號
 //   bun run src/cli.ts rename <帳號> <顯示名稱>     改顯示名稱（例如 rename claude_a 小克）
-//   bun run src/cli.ts disable <帳號>             停用（例如沒有用到的 hermes_b）；enable <帳號> 恢復
+//   bun run src/cli.ts disable <帳號>             停用（token 失效）；enable <帳號> 恢復。網頁「成員」也能做
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { openDb, ensureOfficeGroup, addMember, OFFICE_GROUP_ID, type Account } from "./db";
 import { createAccount, rotateToken } from "./auth";
@@ -16,8 +16,8 @@ const DEFAULTS = [
   { username: "boss", firstName: "老闆", isBot: false, kind: "human", machine: null },
   { username: "claude_a", firstName: "Claude-A", isBot: true, kind: "claude", machine: "A" },
   { username: "claude_b", firstName: "Claude-B", isBot: true, kind: "claude", machine: "B" },
-  // 目前只有一個 Hermes，跑在 A 機（家裡電腦）的 WSL。之後 B 機也有 Hermes 時：
-  //   bun run cli add hermes_b --name Hermes-B --kind hermes --machine B
+  // 預設只建 A 機的 Hermes（Windows 原生版）。其他機器的 agent 用 office join 加入（網頁按確認），
+  // 或手動：bun run cli add hermes_b --name Hermes-B --kind hermes --machine B
   { username: "hermes_a", firstName: "Hermes-A", isBot: true, kind: "hermes", machine: "A" },
 ];
 

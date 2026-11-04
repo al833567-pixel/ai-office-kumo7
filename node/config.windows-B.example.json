@@ -4,6 +4,5 @@
   "claude_token": "7000000002:貼上 claude_b 的 token",
   "approvers": [1000000001],
   "workers": [],
-  "claude_mode": "channel",
-  "claude_process_pattern": "office@office-local"
+  "claude_mode": "desktop"
 }

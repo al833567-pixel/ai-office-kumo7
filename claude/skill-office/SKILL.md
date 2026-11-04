@@ -1,6 +1,6 @@
 ---
 name: office
-description: 把一個目標交給 AI 辦公室團隊：你當主管，拆解成任務，派給 Hermes 與另一個 Claude，追蹤回報，最後在這個 session 交出成果。使用者輸入 /office <目標> 時使用。
+description: 把一個目標交給 AI 辦公室團隊：你當主管，拆解成任務，派給各台的 Hermes 與其他 Claude，追蹤回報，最後在這個 session 交出成果。使用者輸入 /office <目標> 時使用。
 ---
 
 # /office：帶領團隊完成目標
@@ -19,15 +19,18 @@ description: 把一個目標交給 AI 辦公室團隊：你當主管，拆解成
 
 先在心裡列出完成目標需要的步驟，再為每一步呼叫 `office_assign`。原則：
 
-- **Hermes（目前只有 hermes_a，跑在 A 機的 Windows）是本地小模型**：只給「單一、具體、可驗證」的工作，例如一個指令、搬檔、排程、查 log、整理成表格。**一定要給 `verify`**：一個結束碼 0 就代表完成的指令。
-  - 它在 Windows 上：路徑用 Windows 格式（`D:\data\a.csv`）。
+- **Hermes 是本地小模型**：只給「單一、具體、可驗證」的工作，例如一個指令、搬檔、排程、查 log、整理成表格。**一定要給 `verify`**：一個結束碼 0 就代表完成的指令。
+  - 用 `office_agents` 看有哪些 Hermes、各在哪台機器（目前 A 機是 Windows 原生版，B 機是 WSL 版）。**每個 Hermes 只碰得到自己那台機器的檔案**：哪台的工作就派給哪台的 Hermes。
+  - Windows 原生版：路徑用 Windows 格式（`D:\data\a.csv`），`verify` 由 cmd.exe 執行。
+  - WSL／Linux 版：路徑用 Linux 格式（Windows 的 `D:\data` 在 WSL 裡是 `/mnt/d/data`），`verify` 由 `/bin/sh` 執行，寫 shell 指令。
   - **說明要寫「要什麼結果」，不要寫死「用什麼指令」**：Hermes 有自己的安全規則，可能擋下 PowerShell 等指令（A 機實測：它擋掉 PowerShell，改用 `df`／`awk` 拿到一樣的結果）。可以附建議做法，但寫明「做法不限，結果對就好」。真正把關的是 `verify`。
-  - `verify` 由 office-node 用 cmd.exe 執行（不經過 Hermes，不受它的安全規則限制），在任務的工作目錄裡跑；複雜的檢查用 PowerShell。
-  - **驗收必須檢查內容，不能只看檔案存在**（`dir`、`if exist` 等於沒檢查）。要驗證的是「結果對不對」：內容包含預期的字、行數或欄位對、數值在合理範圍、指令輸出符合預期。例如：
+  - `verify` 由 office-node 執行（不經過 Hermes，不受它的安全規則限制），在任務的工作目錄裡跑；Windows 上複雜的檢查用 PowerShell。
+  - **驗收必須檢查內容，不能只看檔案存在**（`dir`、`if exist`、`test -f` 等於沒檢查）。要驗證的是「結果對不對」：內容包含預期的字、行數或欄位對、數值在合理範圍、指令輸出符合預期。例如（Windows）：
     - `powershell -NoProfile -Command "$c = Get-Content out\report.csv; if ($c.Count -ge 2 -and $c[0] -match 'name,size') { exit 0 } else { exit 1 }"`
     - `powershell -NoProfile -Command "if ((Get-Content D:\office-test\hello.txt -Raw) -match (Get-Date -Format 'yyyy-MM-dd')) { exit 0 } else { exit 1 }"`
   - 要交付的檔案請它放在任務說明寫的輸出目錄（環境變數 `OFFICE_OUT`），會自動上傳。
-  - B 機上的檔案它碰不到：B 機的工作派給 Claude-B，或先請 Claude-B 用 `office upload` 傳上來，再在任務說明裡附 file_id 讓 Hermes 用 `office download` 取得。
+    - WSL／Linux：`grep -q "name,size" out/report.csv && [ "$(wc -l < out/report.csv)" -ge 2 ]`
+  - 要用另一台的檔案：先請那台的 agent 用 `office upload` 傳上來，再在任務說明裡附 file_id，讓這台用 `office download` 取得。
 - **Claude（你自己、另一個 Claude）**：寫程式、改多個檔案、需要判斷的工作。要自己做的部分也派給自己（`assignee` 填自己），再 `office_claim` 開始做，這樣狀態才會正確顯示。
 - 每張任務的 `instructions` 都要寫清楚：目標、輸入（路徑）、步驟、**不要做什麼**、預期產出、檔案放哪裡（Hermes 的產出放在 `$OFFICE_OUT` 目錄會自動上傳）。
 - 有先後順序就用 `depends_on`，前面的完成後系統會自動派出後面的。

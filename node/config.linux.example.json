@@ -1,17 +1,15 @@
 {
   "hub": "http://100.x.y.z:7070",
-  "machine": "C",
-  "claude_token": "貼上這台 Claude 的 token（沒有 Claude 就刪掉這行）",
+  "machine": "B",
   "approvers": [1000000001],
   "workers": [
     {
-      "name": "hermes_c",
+      "name": "hermes_b",
       "token": "貼上這台 Hermes 的 token",
       "cmd": ["hermes", "chat", "-Q", "-q"],
       "prompt_via": "arg",
       "cwd": "~/office-work",
       "timeout_min": 30
     }
-  ],
-  "claude_process_pattern": "office@office-local"
+  ]
 }
