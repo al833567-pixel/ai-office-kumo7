@@ -202,6 +202,7 @@ export interface Account {
   machine: string | null;
   disabled: number;
   password_hash?: string | null;
+  deleted?: number;
   created_at: number;
 }
 
@@ -239,6 +240,7 @@ export function openDb(path: string): Database {
   if (!cols.includes("kind")) db.exec("ALTER TABLE accounts ADD COLUMN kind TEXT NOT NULL DEFAULT 'other'");
   if (!cols.includes("machine")) db.exec("ALTER TABLE accounts ADD COLUMN machine TEXT");
   if (!cols.includes("password_hash")) db.exec("ALTER TABLE accounts ADD COLUMN password_hash TEXT");
+  if (!cols.includes("deleted")) db.exec("ALTER TABLE accounts ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0");
   const mcols = (db.query("PRAGMA table_info(messages)").all() as { name: string }[]).map((c) => c.name);
   if (!mcols.includes("media")) db.exec("ALTER TABLE messages ADD COLUMN media TEXT");
   const tcols = (db.query("PRAGMA table_info(tasks)").all() as { name: string }[]).map((c) => c.name);

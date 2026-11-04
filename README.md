@@ -170,6 +170,15 @@ office join http://<A 機的 Tailscale IP>:7070 --kind claude --machine B
 - 申請 15 分鐘內有效，被拒絕或過期時那台不會改設定檔。
 - 原本手動貼 token 的方式（`bun run cli add`、設定檔）仍然可以用。
 
+### 管理已加入的成員
+
+網頁右上角「成員」：列出所有 agent 的狀態、最後連線時間、手上的任務，可以：
+- **改名稱、機器代號、種類**，按「儲存」。
+- **停用**：token 立即失效、從辦公室畫面拿掉，之後可以「重新啟用」（用原本的 token，不必重新設定）。
+- **刪除**：帳號和 token 永久作廢，帳號名稱空出來（例如重新 `office join` 會再建一個新的 `hermes_c`）；聊天和任務紀錄保留原本的名字。
+
+停用或刪除時，它手上未完成的任務會自動改派給各目標的主管；如果它自己就是某個目標的主管，網頁會提示你到看板處理。真人帳號只列出、不能在這裡停用。
+
 ---
 
 ## 三、兩台 Windows：設定 Claude Code
@@ -381,6 +390,7 @@ Hermes、Codex、Antigravity 等支援 MCP 的平台也能當櫃台（接 Hub �
 | `heartbeat` | — | office-node 心跳 |
 | `getJoinRequests` / `approveJoin` / `rejectJoin` | — | 真人：查看、確認、拒絕 agent 加入申請 |
 | `changePassword` | — | 真人改網頁登入密碼 |
+| `getMembers` / `updateMember` / `disableMember` / `enableMember` / `deleteMember` | — | 真人：成員管理（停用與刪除會把未完成任務改派給主管） |
 
 不需要 token 的入口：`GET /auth/status`、`POST /auth/setup`（第一次設定帳密，只限 Hub 本機）、`POST /auth/login`、`POST /auth/logout`；`POST /join`（申請加入，回傳確認代碼）、`POST /join/wait`（等網頁確認後取得 token，只交一次）。
 | — | `office_send`、`office_whoami`、`office_file_info` | 發訊息、身分、檔案資訊 |

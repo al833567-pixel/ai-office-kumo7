@@ -163,6 +163,21 @@ a.tag{text-decoration:none}
 .join .code{font-family:var(--f-mono);font-weight:900;font-size:18px;letter-spacing:2px;background:#fff;border:2px dashed #E9A65A;border-radius:6px;padding:0 8px}
 .join input{background:var(--panel-2);border:2px solid var(--soft);border-radius:6px;padding:4px 8px;font-size:13px;width:130px}
 .join .acts{margin-left:auto;display:flex;gap:6px}
+.modal{position:fixed;inset:0;z-index:35;background:rgb(60 40 25 / .35);display:grid;place-items:center;padding:16px}
+.modal .panel{width:min(980px,100%);max-height:88vh;overflow:auto;padding:16px 18px}
+.modal .mh{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.modal h2{margin:0;font-family:var(--f-round);font-weight:900}
+.modal h3{margin:14px 0 6px;font-size:14px;color:#7A6455}
+.modal .hint{font-size:12px;color:#7A6455;margin:6px 0 4px}
+.mrow{display:grid;grid-template-columns:28px minmax(120px,1.4fr) minmax(90px,1fr) 70px 120px minmax(110px,1fr) auto;gap:8px;align-items:center;padding:8px 0;border-top:1px dashed var(--soft)}
+.mrow img{width:22px;height:22px}
+.mrow input,.mrow select{width:100%;min-width:0;background:var(--panel-2);border:2px solid var(--soft);border-radius:6px;padding:4px 7px;font-size:13px}
+.mrow .u{font-family:var(--f-mono);font-size:12px;color:#7A6455;overflow:hidden;text-overflow:ellipsis}
+.mrow .st{font-size:12px}
+.mrow .acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.mrow.off{opacity:.65}
+.btn.danger{background:#F3C4BC;box-shadow:0 2px 0 #C9867B}
+@media (max-width:760px){.mrow{grid-template-columns:28px 1fr 1fr;}.mrow .u,.mrow .st{grid-column:2/4}.mrow .acts{grid-column:1/4}}
 .dtasks{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:12px}
 .dtasks li{display:flex;gap:8px}
 .stream .state{color:#F4C77A}
@@ -190,7 +205,7 @@ a.tag{text-decoration:none}
 <div class="wrap">
   <header class="top">
     <div class="brand"><h1>AI <span>辦公室</span></h1><span class="tagline" id="me">連線中…</span></div>
-    <div class="toolbar"><span class="conn off" id="conn">未連線</span><button class="btn tiny" type="button" id="notifyBtn">🔕 通知關</button><button class="btn tiny" type="button" id="pwBtn">改密碼</button><button class="btn tiny" type="button" id="logout">登出</button></div>
+    <div class="toolbar"><span class="conn off" id="conn">未連線</span><button class="btn tiny" type="button" id="notifyBtn">🔕 通知關</button><button class="btn tiny" type="button" id="membersBtn">成員</button><button class="btn tiny" type="button" id="pwBtn">改密碼</button><button class="btn tiny" type="button" id="logout">登出</button></div>
   </header>
 
   <form class="goal card-px" id="goalForm" autocomplete="off">
@@ -251,6 +266,13 @@ a.tag{text-decoration:none}
     <button class="btn" type="submit" id="loginBtn">登入</button>
     <button class="linkbtn" type="button" id="useToken">改用 token 登入</button>
   </form>
+</div>
+<div class="modal" id="members" hidden role="dialog" aria-modal="true" aria-labelledby="membersTitle">
+  <div class="card-px panel">
+    <div class="mh"><h2 id="membersTitle">成員管理</h2><button class="btn tiny" type="button" id="membersClose">關閉</button></div>
+    <p class="hint">新增：在那台電腦執行 <code>office join &lt;Hub 網址&gt; --kind claude|hermes|codex|antigravity|other</code>，再到上方的申請卡片按確認。</p>
+    <div id="memberList"></div>
+  </div>
 </div>
 <div class="toasts" id="toasts" aria-live="polite"></div>
 
@@ -697,12 +719,22 @@ function mapAccounts() {
   const bots = accounts.filter((a) => a.is_bot).sort((x, y) =>
     String(x.machine ?? "~").localeCompare(String(y.machine ?? "~")) ||
     ((KIND_ORDER.indexOf(x.kind) + 99) % 99) - ((KIND_ORDER.indexOf(y.kind) + 99) % 99) || x.id - y.id);
-  bots.slice(0, DESK_COUNT).forEach((b, i) => {
-    const slot = "desk" + (i + 1);
-    if (userOf[slot] && userOf[slot] !== b.username) return;
-    slotOf[b.username] = slot; userOf[slot] = b.username;
+  // 已停用／刪除的帳號讓出工位；其餘的人留在原位（不會因為重新整理而換位子），新成員坐進空位
+  const alive = new Set(bots.map((b) => b.username));
+  for (const [slot, u] of Object.entries(userOf)) if (!alive.has(u)) {
+    delete userOf[slot]; delete slotOf[u]; delete hubAgents[u];
+    Object.assign(agents[slot], { name: "空位", kind: null, machine: null, task: null, tool: "", role: null, state: "offline" });
+    if (selected === slot) { selected = null; $("#drawer").hidden = true; }
+  }
+  for (const b of bots) {
+    let slot = slotOf[b.username];
+    if (!slot) {
+      slot = Array.from({ length: DESK_COUNT }, (_, i) => "desk" + (i + 1)).find((d) => !userOf[d]);
+      if (!slot) continue;
+      slotOf[b.username] = slot; userOf[slot] = b.username;
+    }
     Object.assign(agents[slot], { name: b.first_name, kind: b.kind, machine: b.machine });
-  });
+  }
   if (bots.length > DESK_COUNT) console.warn(`辦公室最多 ${DESK_COUNT} 個工位，${bots.slice(DESK_COUNT).map((b) => b.username).join("、")} 不會顯示在辦公室`);
 }
 
@@ -948,8 +980,10 @@ function handleEvent(ev) {
       renderBoard(); refreshThreads(); break;
     }
     case "account":
-      if (p.joined || !accounts.some((a) => a.id === p.id)) { if (ws && ws.readyState === 1) ws.send("snapshot"); } // 新成員：重新分配工位
+      // 新成員、停用、刪除、改機器或種類：重新分配工位；只改名就直接更新
+      if (p.joined || p.changed || !accounts.some((a) => a.id === p.id)) { if (ws && ws.readyState === 1) ws.send("snapshot"); }
       else applyRename(p);
+      if (!$("#members").hidden) renderMembers();
       break;
     case "join": {
       const i = joins.findIndex((j) => j.request_id === p.request_id);
@@ -1068,6 +1102,57 @@ $("#pwBtn").addEventListener("click", async () => {
   if (prompt("再輸入一次新密碼") !== nw) { toast("兩次密碼不一樣", "#E0675A"); return; }
   try { await api("changePassword", { old_password: old, new_password: nw }); toast("密碼已更新", "#5DB585"); }
   catch (err) { toast(String(err.message).replace(/^[A-Za-z ]+:\s*/, ""), "#E0675A"); }
+});
+
+
+/* ---------- 成員管理 ---------- */
+const KIND_OPTS = ["claude", "hermes", "codex", "antigravity", "other"];
+const ago = (ms) => { if (!ms) return "從未連線"; const s = Math.floor((Date.now() - ms) / 1000); return s < 60 ? "剛剛" : s < 3600 ? `${Math.floor(s / 60)} 分鐘前` : s < 86400 ? `${Math.floor(s / 3600)} 小時前` : `${Math.floor(s / 86400)} 天前`; };
+async function renderMembers() {
+  let list;
+  try { list = await api("getMembers"); } catch (err) { $("#memberList").innerHTML = `<p class="hint">${esc(err.message)}</p>`; return; }
+  const row = (m) => {
+    const work = [m.open_tasks ? `${m.open_tasks} 個未完成任務` : "", m.leading_goals ? `主管 ${m.leading_goals} 個目標` : ""].filter(Boolean).join("、");
+    if (!m.is_bot) return `<div class="mrow"><span>🙂</span><b>${esc(m.name)}${m.is_me ? "（你）" : ""}</b><span class="u">@${esc(m.username)}</span><span></span><span class="st">真人</span><span></span><span></span></div>`;
+    return `<div class="mrow${m.disabled ? " off" : ""}" data-u="${esc(m.username)}" data-work="${esc(work)}">
+      <img src="/icons/${esc(m.kind)}" alt="${esc(m.kind)}">
+      <input class="mn" value="${esc(m.name)}" maxlength="24" aria-label="名稱" ${m.disabled ? "disabled" : ""}>
+      <span class="u" title="帳號">@${esc(m.username)}</span>
+      <input class="mm" value="${esc(m.machine || "")}" maxlength="16" placeholder="機器" aria-label="機器代號" ${m.disabled ? "disabled" : ""}>
+      <select class="mk" aria-label="種類" ${m.disabled ? "disabled" : ""}>${KIND_OPTS.map((k) => `<option value="${k}"${k === m.kind ? " selected" : ""}>${esc(KIND_LABEL[k])}</option>`).join("")}</select>
+      <span class="st">${m.disabled ? "已停用" : `${esc(STATES[m.state] || m.state || "")} · ${ago(m.last_seen)}`}${work ? `<br>${esc(work)}` : ""}</span>
+      <span class="acts">${m.disabled
+        ? `<button class="btn sm" type="button" data-act="enable">重新啟用</button><button class="btn sm danger" type="button" data-act="delete">刪除</button>`
+        : `<button class="btn sm" type="button" data-act="save">儲存</button><button class="btn sm ghost" type="button" data-act="disable">停用</button><button class="btn sm danger" type="button" data-act="delete">刪除</button>`}</span>
+    </div>`;
+  };
+  const bots = list.filter((m) => m.is_bot && !m.disabled), off = list.filter((m) => m.is_bot && m.disabled), people = list.filter((m) => !m.is_bot);
+  $("#memberList").innerHTML = `<h3>Agent（${bots.length}）</h3>${bots.map(row).join("") || `<p class="hint">還沒有 agent。</p>`}`
+    + (off.length ? `<h3>已停用（${off.length}）</h3>${off.map(row).join("")}` : "")
+    + `<h3>真人</h3>${people.map(row).join("")}`;
+}
+function openMembers() { $("#members").hidden = false; renderMembers(); }
+$("#membersBtn").addEventListener("click", openMembers);
+$("#membersClose").addEventListener("click", () => { $("#members").hidden = true; });
+$("#members").addEventListener("click", (e) => { if (e.target.id === "members") $("#members").hidden = true; });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#members").hidden) $("#members").hidden = true; });
+$("#memberList").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-act]"); if (!b) return;
+  const r = b.closest(".mrow"), u = r.dataset.u, act = b.dataset.act, work = r.dataset.work;
+  const nm = r.querySelector(".mn")?.value.trim() || u;
+  const note = work ? `\n\n${work}：未完成的任務會改派給各目標的主管。` : "";
+  if (act === "disable" && !confirm(`停用「${nm}」？\n\n它的 token 會立即失效、從辦公室畫面拿掉，之後可以重新啟用。${note}`)) return;
+  if (act === "delete" && !confirm(`刪除「${nm}」？\n\n帳號與 token 會永久作廢，不能復原（聊天與任務紀錄仍保留）。要再加入請重新執行 office join。${note}`)) return;
+  b.disabled = true;
+  try {
+    if (act === "save") { await api("updateMember", { username: u, name: nm, machine: r.querySelector(".mm").value.trim(), kind: r.querySelector(".mk").value }); toast(`已更新「${nm}」`, "#5DB585"); }
+    else if (act === "enable") { await api("enableMember", { username: u }); toast(`已重新啟用「${nm}」`, "#5DB585"); }
+    else {
+      const res = await api(act === "disable" ? "disableMember" : "deleteMember", { username: u });
+      toast(`已${act === "disable" ? "停用" : "刪除"}「${nm}」${res.reassigned ? `，${res.reassigned} 個任務改派給主管` : ""}${res.left ? `；還有 ${res.left} 項要你處理（看板）` : ""}`, act === "disable" ? "#A79C93" : "#E0675A");
+    }
+  } catch (err) { toast(String(err.message).replace(/^[A-Za-z ]+:\s*/, ""), "#E0675A"); }
+  renderMembers();
 });
 
 /* ---------- 新 agent 申請加入 ---------- */

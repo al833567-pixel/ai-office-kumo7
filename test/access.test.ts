@@ -110,3 +110,47 @@ describe("agent 申請加入", () => {
     expect((await userCall(bossToken, "approveJoin", { request_id: j2.result.request_id, username: "kumo" })).ok).toBe(false);
   });
 });
+
+describe("成員管理", () => {
+  const bot = (t: string, m: string, p: unknown = {}) => post(`/bot${t}/${m}`, p);
+  test("列出、改名稱／機器、停用（token 失效、任務改派給主管）、重新啟用、刪除（帳號名稱可再用）", async () => {
+    // 準備：claude_a 當主管，派一個任務給 hermes_b
+    const j = await post("/join", { kind: "claude", machine: "A" });
+    const wp = post("/join/wait", { request_id: j.result.request_id, secret: j.result.secret, timeout: 10 });
+    await userCall(bossToken, "approveJoin", { request_id: j.result.request_id });
+    const claudeTok = (await wp).result.token;
+    const hj = await post("/join", { kind: "hermes", machine: "C" });
+    const hp = post("/join/wait", { request_id: hj.result.request_id, secret: hj.result.secret, timeout: 10 });
+    await userCall(bossToken, "approveJoin", { request_id: hj.result.request_id });
+    const hermesTok = (await hp).result.token;
+    const g = (await bot(claudeTok, "createGoal", { title: "測試" })).result;
+    const t = (await bot(claudeTok, "createTask", { goal_id: g.goal_id, assignee: "hermes_c", title: "x", instructions: "x" })).result;
+
+    const list = (await userCall(bossToken, "getMembers")).result;
+    expect(list.find((m: any) => m.username === "hermes_c")).toMatchObject({ kind: "hermes", machine: "C", disabled: false, open_tasks: 1 });
+    expect(list.find((m: any) => m.is_me)).toMatchObject({ is_bot: false });
+
+    expect((await userCall(bossToken, "updateMember", { username: "hermes_c", name: "赫米C", machine: "C2" })).ok).toBe(true);
+    expect((await bot(hermesTok, "getMe")).result.first_name).toBe("赫米C");
+    expect((await userCall(bossToken, "updateMember", { username: "kumo", name: "x" })).ok).toBe(false); // 真人不能在這裡改
+
+    const d = (await userCall(bossToken, "disableMember", { username: "hermes_c" })).result;
+    expect(d).toEqual({ reassigned: 1, left: 0 });
+    expect((await bot(hermesTok, "getMe")).ok).toBe(false);
+    expect((await bot(claudeTok, "getTasks", { goal_id: g.goal_id })).result.find((x: any) => x.task_id === t.task_id).assignee).toBe("claude_a");
+    expect((await bot(claudeTok, "getAgents")).result.some((a: any) => a.username === "hermes_c")).toBe(false);
+
+    await userCall(bossToken, "enableMember", { username: "hermes_c" });
+    expect((await bot(hermesTok, "getMe")).ok).toBe(true);
+
+    expect((await userCall(bossToken, "deleteMember", { username: "hermes_c" })).ok).toBe(true);
+    expect((await bot(hermesTok, "getMe")).ok).toBe(false);
+    expect((await userCall(bossToken, "getMembers")).result.some((m: any) => m.username.startsWith("hermes_c"))).toBe(false);
+    expect((await userCall(bossToken, "enableMember", { username: "hermes_c" })).ok).toBe(false);
+    // 帳號名稱空出來：同一台重新申請會建新的 hermes_c
+    const again = await post("/join", { kind: "hermes", machine: "C" });
+    const pend = (await userCall(bossToken, "getJoinRequests")).result.find((x: any) => x.request_id === again.result.request_id);
+    expect(pend).toMatchObject({ suggested_username: "hermes_c", existing_account: false });
+    expect((await userCall(bossToken, "approveJoin", { request_id: again.result.request_id })).result).toMatchObject({ username: "hermes_c", rejoined: false });
+  });
+});

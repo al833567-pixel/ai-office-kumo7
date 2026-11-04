@@ -6,6 +6,7 @@ import { randomInt } from "node:crypto";
 import { type Account, addMember, logEvent, OFFICE_GROUP_ID } from "./db";
 import { authenticate, createAccount, createSession, deleteSession, hashSecret, newSecret, rotateToken } from "./auth";
 import { ApiError, type Ctx } from "./botapi";
+import { agentStates, taskMethods } from "./tasks";
 
 export const KINDS = ["claude", "hermes", "codex", "antigravity", "other"] as const;
 const JOIN_TTL_MS = 15 * 60_000;
@@ -176,7 +177,8 @@ export const accessMethods: Record<string, (ctx: Ctx, p: Json) => unknown> = {
     const kind = s(p.kind) && (KINDS as readonly string[]).includes(s(p.kind)!) ? s(p.kind)! : r.kind;
     const machine = (s(p.machine) ?? r.machine ?? "").trim().slice(0, 16) || null;
     const name = ((s(p.name) ?? r.name).replace(/[\r\n\t]/g, " ").trim() || r.name).slice(0, 24);
-    let username = (s(p.username) ?? "").trim().toLowerCase().replace(/^@/, "");
+    // 沒指定帳號就用卡片上的建議（同種類同機器的既有帳號＝重新加入）
+    let username = (s(p.username) ?? "").trim().toLowerCase().replace(/^@/, "") || joinObj(db, r).suggested_username || "";
     let token: string;
     const existing = username ? db.query("SELECT * FROM accounts WHERE username = ?").get(username) as Account | null : null;
     if (existing) {
@@ -208,6 +210,70 @@ export const accessMethods: Record<string, (ctx: Ctx, p: Json) => unknown> = {
     return true;
   },
 
+  // ---------- 成員管理（網頁）----------
+  getMembers(ctx) {
+    humanOnly(ctx);
+    const { db } = ctx;
+    const states = agentStates(ctx);
+    const rows = db.query("SELECT * FROM accounts WHERE deleted = 0 ORDER BY is_bot DESC, disabled, id").all() as Account[];
+    return rows.map((a) => {
+      const st = states[a.username];
+      const openTasks = (db.query("SELECT COUNT(*) AS n FROM tasks WHERE assignee_id = ? AND status IN ('todo','doing','blocked')").get(a.id) as { n: number }).n;
+      const leading = (db.query("SELECT COUNT(*) AS n FROM goals WHERE lead_id = ? AND status = 'doing'").get(a.id) as { n: number }).n;
+      return { id: a.id, username: a.username, name: a.first_name, kind: a.kind, machine: a.machine, is_bot: !!a.is_bot, disabled: !!a.disabled,
+        is_me: a.id === ctx.me.id, state: a.is_bot && !a.disabled ? st?.state ?? "offline" : null, last_seen: st?.last_seen ?? null,
+        open_tasks: openTasks, leading_goals: leading, created_at: (a as Account & { created_at?: number }).created_at ?? null };
+    });
+  },
+
+  updateMember(ctx, p) {
+    humanOnly(ctx);
+    const a = memberBot(ctx, p.username);
+    const name = s(p.name) !== undefined ? (s(p.name) ?? "").replace(/[\r\n\t]/g, " ").trim() : a.first_name;
+    if (!name || [...name].length > 24) throw new ApiError(400, "Bad Request: 名稱要 1–24 個字");
+    const machine = s(p.machine) !== undefined ? (s(p.machine) ?? "").trim().slice(0, 16) || null : a.machine;
+    if (machine && !/^[A-Za-z0-9_-]+$/.test(machine)) throw new ApiError(400, "Bad Request: 機器代號只能用英數字、-、_");
+    const kind = s(p.kind) !== undefined ? s(p.kind)! : a.kind;
+    if (!(KINDS as readonly string[]).includes(kind)) throw new ApiError(400, `Bad Request: 種類要是 ${KINDS.join("、")} 其中之一`);
+    ctx.db.query("UPDATE accounts SET first_name = ?, machine = ?, kind = ? WHERE id = ?").run(name, machine, kind, a.id);
+    memberEvent(ctx, a.id, { changed: true });
+    return true;
+  },
+
+  /** 停用：token 立即失效、從辦公室畫面拿掉，可重新啟用；手上未完成的任務改派給各目標的主管 */
+  disableMember(ctx, p) {
+    humanOnly(ctx);
+    const a = memberBot(ctx, p.username);
+    ctx.db.query("UPDATE accounts SET disabled = 1 WHERE id = ?").run(a.id);
+    const moved = handOver(ctx, a);
+    memberEvent(ctx, a.id, { changed: true, disabled: true });
+    return { reassigned: moved.reassigned, left: moved.left };
+  },
+
+  enableMember(ctx, p) {
+    humanOnly(ctx);
+    const a = memberBot(ctx, p.username);
+    ctx.db.query("UPDATE accounts SET disabled = 0 WHERE id = ?").run(a.id);
+    addMember(ctx.db, OFFICE_GROUP_ID, a.id);
+    memberEvent(ctx, a.id, { changed: true, disabled: false });
+    return true;
+  },
+
+  /** 刪除：永久作廢 token，帳號名稱空出來可再用；聊天與任務歷史仍顯示原本的名字 */
+  deleteMember(ctx, p) {
+    humanOnly(ctx);
+    const a = memberBot(ctx, p.username);
+    ctx.db.query("UPDATE accounts SET disabled = 1 WHERE id = ?").run(a.id);
+    const moved = handOver(ctx, a);
+    const freed = `${a.username.slice(0, 20)}_del${a.id}`.slice(0, 32);
+    ctx.db.query("UPDATE accounts SET deleted = 1, username = ?, token_hash = ? WHERE id = ?").run(freed, hashSecret(newSecret()), a.id);
+    ctx.db.query("DELETE FROM chat_members WHERE account_id = ?").run(a.id);
+    ctx.db.query("DELETE FROM updates WHERE account_id = ?").run(a.id);
+    ctx.db.query("DELETE FROM presence WHERE account_id = ?").run(a.id);
+    logEvent(ctx.db, "account", ctx.me.id, null, { id: a.id, username: a.username, first_name: a.first_name, kind: a.kind, machine: a.machine, is_bot: true, changed: true, deleted: true });
+    return { reassigned: moved.reassigned, left: moved.left };
+  },
+
   async changePassword(ctx, p) {
     humanOnly(ctx);
     const acc = ctx.db.query("SELECT * FROM accounts WHERE id = ?").get(ctx.me.id) as Account;
@@ -217,3 +283,30 @@ export const accessMethods: Record<string, (ctx: Ctx, p: Json) => unknown> = {
   },
 };
 
+function memberBot(ctx: Ctx, username: unknown) {
+  const u = (s(username) ?? "").replace(/^@/, "");
+  const a = ctx.db.query("SELECT * FROM accounts WHERE username = ? AND deleted = 0").get(u) as Account | null;
+  if (!a) throw new ApiError(400, "Bad Request: 找不到這個成員");
+  if (!a.is_bot) throw new ApiError(400, "Bad Request: 真人帳號不能在這裡停用或刪除");
+  return a;
+}
+
+function memberEvent(ctx: Ctx, id: number, extra: Json) {
+  const a = ctx.db.query("SELECT * FROM accounts WHERE id = ?").get(id) as Account;
+  logEvent(ctx.db, "account", ctx.me.id, null, { id: a.id, username: a.username, first_name: a.first_name, kind: a.kind, machine: a.machine, is_bot: !!a.is_bot, ...extra });
+}
+
+/** 停用或刪除前：未完成的任務改派給該目標的主管（主管就是自己或也不能用時留著，回報數量給網頁提示） */
+function handOver(ctx: Ctx, a: Account) {
+  const { db } = ctx;
+  const tasks = db.query(`SELECT t.id, g.lead_id FROM tasks t JOIN goals g ON g.id = t.goal_id
+                          WHERE t.assignee_id = ? AND t.status IN ('todo','doing','blocked')`).all(a.id) as { id: number; lead_id: number }[];
+  let reassigned = 0, left = 0;
+  for (const t of tasks) {
+    const lead = db.query("SELECT * FROM accounts WHERE id = ? AND disabled = 0").get(t.lead_id) as Account | null;
+    if (!lead || lead.id === a.id) { left++; continue; }
+    try { taskMethods.reassignTask(ctx, { task_id: t.id, assignee: lead.username }); reassigned++; } catch { left++; }
+  }
+  left += (db.query("SELECT COUNT(*) AS n FROM goals WHERE lead_id = ? AND status = 'doing'").get(a.id) as { n: number }).n;
+  return { reassigned, left };
+}
